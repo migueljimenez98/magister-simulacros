@@ -16,6 +16,12 @@ const DIFF_COLOR: Record<string, string> = {
   medio: "text-amber-300 border-amber-700 bg-amber-900/30",
   dificil: "text-rose-300 border-rose-700 bg-rose-900/30",
 };
+// Borde por nivel: facil verde · medio amarillo · dificil rojo.
+const NIVEL_BORDER: Record<string, string> = {
+  facil: "border-emerald-500",
+  medio: "border-amber-500",
+  dificil: "border-rose-500",
+};
 const fdate = (s: string | null) => (s ? new Date(s).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" }) : "—");
 const nivelIdx = (n: string | null) => (n ? NIVELES.indexOf(n as (typeof NIVELES)[number]) : -1);
 
@@ -162,15 +168,18 @@ function DeptChips({ memberships }: { memberships: AgenteRow["memberships"] }) {
   if (!memberships.length) return <span className="text-rose-400 text-xs">sin departamento</span>;
   return (
     <div className="flex flex-wrap gap-1">
-      {memberships.map((m) => (
-        <span
-          key={m.id}
-          title={m.activo ? "Departamento activo" : "Inactivo"}
-          className={`text-xs px-2 py-0.5 rounded-full border whitespace-nowrap ${m.activo ? "border-accent text-white bg-accent/10 font-medium" : "border-border text-muted"}`}
-        >
-          {m.activo ? "★ " : ""}{m.departamento} · {m.nivel ?? "—"}
-        </span>
-      ))}
+      {memberships.map((m) => {
+        const ring = NIVEL_BORDER[m.nivel ?? ""] ?? "border-border";
+        return (
+          <span
+            key={m.id}
+            title={`${m.nivel ?? "—"} · ${m.activo ? "activo" : "inactivo"}`}
+            className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${ring} ${m.activo ? "border-2 text-white font-medium" : "border text-muted opacity-70"}`}
+          >
+            {m.departamento} · {m.nivel ?? "—"}
+          </span>
+        );
+      })}
     </div>
   );
 }
