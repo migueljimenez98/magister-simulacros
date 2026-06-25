@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -10,7 +10,8 @@ import {
   type ComercialInput,
   type Departamento,
   type DepartamentoInput,
-  type Evaluadores,
+  type Evaluador,
+  type EvaluadorInput,
   type FaqItem,
   type Scenario,
   type ScenarioInput,
@@ -38,7 +39,7 @@ const EMPTY_SCENARIO: ScenarioInput = {
   department_id: null,
 };
 
-type ScenarioModalState = { scenario: Scenario | null; departmentId: string | null };
+type ScenarioModalState = { scenario: Scenario | null; departmentId: string | null; draft?: ScenarioInput };
 type ComercialModalState = { comercial: Comercial | null; departmentId: string | null };
 
 export default function SimulacrosPage() {
@@ -55,16 +56,22 @@ export default function SimulacrosPage() {
     queryKey: ["sim-departamentos"],
     queryFn: simulacrosApi.listDepartamentos,
   });
+  const { data: evaluadores } = useQuery({
+    queryKey: ["sim-evaluadores-cat"],
+    queryFn: simulacrosApi.listEvaluadores,
+  });
 
   const [scenarioModal, setScenarioModal] = useState<ScenarioModalState | null>(null);
   const [comercialModal, setComercialModal] = useState<ComercialModalState | null>(null);
   const [deptModal, setDeptModal] = useState<Departamento | "new" | null>(null);
+  const [generarModal, setGenerarModal] = useState<{ departmentId: string | null } | null>(null);
   const [testing, setTesting] = useState<Scenario | null>(null);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["sim-scenarios"] });
     qc.invalidateQueries({ queryKey: ["sim-comerciales"] });
     qc.invalidateQueries({ queryKey: ["sim-departamentos"] });
+    qc.invalidateQueries({ queryKey: ["sim-evaluadores-cat"] });
   };
 
   const deptList = departamentos ?? [];
@@ -108,6 +115,7 @@ export default function SimulacrosPage() {
               allScenarios={scenarios ?? []}
               onEditDept={() => setDeptModal(dept)}
               onNewScenario={() => setScenarioModal({ scenario: null, departmentId: dept.id })}
+              onGenerar={() => setGenerarModal({ departmentId: dept.id })}
               onEditScenario={(s) => setScenarioModal({ scenario: s, departmentId: s.department_id ?? dept.id })}
               onTestScenario={(s) => setTesting(s)}
               onNewComercial={() => setComercialModal({ comercial: null, departmentId: dept.id })}
@@ -138,15 +146,27 @@ export default function SimulacrosPage() {
         </section>
       )}
 
-      <EvaluadoresPanel />
+      <EvaluadoresCatalog />
 
       {scenarioModal && (
         <PersonalidadModal
           scenario={scenarioModal.scenario}
           departmentId={scenarioModal.departmentId}
+          draft={scenarioModal.draft}
           departamentos={deptList}
           onClose={() => setScenarioModal(null)}
           onSaved={() => { setScenarioModal(null); invalidate(); }}
+        />
+      )}
+      {generarModal && (
+        <GenerarPersonaModal
+          departmentId={generarModal.departmentId}
+          departamentos={deptList}
+          onClose={() => setGenerarModal(null)}
+          onGenerated={(draft) => {
+            setGenerarModal(null);
+            setScenarioModal({ scenario: null, departmentId: draft.department_id ?? generarModal.departmentId, draft });
+          }}
         />
       )}
       {comercialModal && (
@@ -162,6 +182,7 @@ export default function SimulacrosPage() {
       {deptModal && (
         <DepartmentModal
           dept={deptModal === "new" ? null : deptModal}
+          evaluadores={evaluadores ?? []}
           onClose={() => setDeptModal(null)}
           onSaved={() => { setDeptModal(null); invalidate(); }}
         />
@@ -175,7 +196,7 @@ export default function SimulacrosPage() {
 
 function DepartmentSection({
   dept, scenarios, comerciales, allScenarios,
-  onEditDept, onNewScenario, onEditScenario, onTestScenario,
+  onEditDept, onNewScenario, onGenerar, onEditScenario, onTestScenario,
   onNewComercial, onEditComercial, onChanged,
 }: {
   dept: Departamento;
@@ -184,6 +205,7 @@ function DepartmentSection({
   allScenarios: Scenario[];
   onEditDept: () => void;
   onNewScenario: () => void;
+  onGenerar: () => void;
   onEditScenario: (s: Scenario) => void;
   onTestScenario: (s: Scenario) => void;
   onNewComercial: () => void;
@@ -221,9 +243,15 @@ function DepartmentSection({
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h4 className="font-medium">Personalidades ({scenarios.length})</h4>
-          <button onClick={onNewScenario} className="text-sm text-accent hover:underline">
-            + Nueva personalidad
-          </button>
+          <div className="flex items-center gap-3">
+            <button onClick={onGenerar} className="text-sm text-accent hover:underline">
+              ✨ Generar con IA
+            </button>
+            <span className="text-border">·</span>
+            <button onClick={onNewScenario} className="text-sm text-accent hover:underline">
+              + Nueva personalidad
+            </button>
+          </div>
         </div>
         {!scenarios.length ? (
           <p className="text-sm text-muted">Sin personalidades todavía en este departamento.</p>
@@ -379,10 +407,11 @@ function stripId(s: Scenario): ScenarioInput {
 }
 
 function PersonalidadModal({
-  scenario, departmentId, departamentos, onClose, onSaved,
+  scenario, departmentId, draft, departamentos, onClose, onSaved,
 }: {
   scenario: Scenario | null;
   departmentId: string | null;
+  draft?: ScenarioInput;
   departamentos: Departamento[];
   onClose: () => void;
   onSaved: () => void;
@@ -390,7 +419,9 @@ function PersonalidadModal({
   const [form, setForm] = useState<ScenarioInput>(
     scenario
       ? stripId(scenario)
-      : { ...EMPTY_SCENARIO, department_id: departmentId },
+      : draft
+        ? { ...EMPTY_SCENARIO, ...draft, department_id: draft.department_id ?? departmentId }
+        : { ...EMPTY_SCENARIO, department_id: departmentId },
   );
   const save = useMutation({
     mutationFn: () =>
@@ -402,7 +433,7 @@ function PersonalidadModal({
   const set = (k: keyof ScenarioInput, v: string | boolean | null) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
-    <Modal title={scenario ? "Editar personalidad" : "Nueva personalidad"} onClose={onClose}>
+    <Modal title={scenario ? "Editar personalidad" : draft ? "Nueva personalidad (generada con IA — revísala)" : "Nueva personalidad"} onClose={onClose}>
       <div className="space-y-3">
         <Input label="Nombre de la persona IA" value={form.nombre} onChange={(v) => set("nombre", v)} />
         <div className="grid grid-cols-2 gap-3">
@@ -444,6 +475,78 @@ function PersonalidadModal({
         {save.isError && <p className="text-sm text-rose-400">No se pudo guardar.</p>}
       </div>
       <ModalActions onClose={onClose} onSave={() => save.mutate()} saving={save.isPending} disabled={!form.nombre.trim()} />
+    </Modal>
+  );
+}
+
+// ─── Generar Persona IA (con IA) ─────────────────────────────────────────────
+
+function GenerarPersonaModal({
+  departmentId, departamentos, onClose, onGenerated,
+}: {
+  departmentId: string | null;
+  departamentos: Departamento[];
+  onClose: () => void;
+  onGenerated: (draft: ScenarioInput) => void;
+}) {
+  const [deptId, setDeptId] = useState(departmentId ?? "");
+  const [dificultad, setDificultad] = useState<string>("medio");
+  const [nombre, setNombre] = useState("");
+  const [descripcion, setDescripcion] = useState("");
+  const gen = useMutation({
+    mutationFn: () =>
+      simulacrosApi.generarPersona({
+        nombre: nombre.trim(), dificultad, descripcion, department_id: deptId || null,
+      }),
+    onSuccess: (draft) => onGenerated(draft),
+  });
+
+  return (
+    <Modal title="Generar persona IA" onClose={onClose}>
+      <div className="space-y-3">
+        <p className="text-sm text-muted">
+          La IA crea una persona realista (perfil, objeciones, motivo de la llamada) usando las FAQs
+          del departamento del nivel elegido. Luego la revisas y la guardas.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="text-sm space-y-1 block">
+            <span className="text-muted">Departamento</span>
+            <select
+              value={deptId}
+              onChange={(e) => setDeptId(e.target.value)}
+              className="w-full bg-bg border border-border rounded-lg px-3 py-2"
+            >
+              <option value="">— sin departamento —</option>
+              {departamentos.map((d) => <option key={d.id} value={d.id}>{d.nombre}</option>)}
+            </select>
+          </label>
+          <label className="text-sm space-y-1 block">
+            <span className="text-muted">Dificultad</span>
+            <select
+              value={dificultad}
+              onChange={(e) => setDificultad(e.target.value)}
+              className="w-full bg-bg border border-border rounded-lg px-3 py-2"
+            >
+              {NIVELES.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+        </div>
+        <Input label="Nombre de la persona" value={nombre} onChange={setNombre} />
+        <TextArea
+          label="Descripción / cómo quieres que se comporte (perfil, motivo, carácter…)"
+          value={descripcion}
+          onChange={setDescripcion}
+          rows={4}
+        />
+        {gen.isError && <p className="text-sm text-rose-400">No se pudo generar (¿falta la API key de OpenAI?).</p>}
+      </div>
+      <ModalActions
+        onClose={onClose}
+        onSave={() => gen.mutate()}
+        saving={gen.isPending}
+        disabled={!nombre.trim()}
+        saveLabel={gen.isPending ? "Generando…" : "Generar"}
+      />
     </Modal>
   );
 }
@@ -558,15 +661,26 @@ function ComercialModal({
 // ─── Department modal (nombre + FAQs comunes estructuradas) ───────────────────
 
 function DepartmentModal({
-  dept, onClose, onSaved,
+  dept, evaluadores, onClose, onSaved,
 }: {
   dept: Departamento | null;
+  evaluadores: Evaluador[];
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [nombre, setNombre] = useState(dept?.nombre ?? "");
+  const [evaluadorId, setEvaluadorId] = useState(dept?.evaluador_id ?? "");
   const [faqs, setFaqs] = useState<FaqItem[]>(dept?.faqs ? [...dept.faqs] : []);
   const [err, setErr] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [importNivel, setImportNivel] = useState("");
+  const importMut = useMutation({
+    mutationFn: (file: File) => simulacrosApi.importFaqs(file, importNivel || undefined),
+    onSuccess: (r) => {
+      setFaqs((f) => [...f, ...r.faqs]);
+      if (fileRef.current) fileRef.current.value = "";
+    },
+  });
 
   const save = useMutation({
     mutationFn: () => {
@@ -574,6 +688,7 @@ function DepartmentModal({
       const body: DepartamentoInput = {
         nombre: nombre.trim(),
         faqs: clean,
+        evaluador_id: evaluadorId || null,
         reglas: (dept?.reglas as Array<Record<string, unknown>>) ?? [],
         auto_evaluar: dept?.auto_evaluar ?? true,
         project_id: dept?.project_id ?? null,
@@ -599,6 +714,18 @@ function DepartmentModal({
       <div className="space-y-4">
         <Input label="Nombre del departamento" value={nombre} onChange={setNombre} />
 
+        <label className="text-sm space-y-1 block">
+          <span className="text-muted">Evaluador (cómo se puntúan sus llamadas)</span>
+          <select
+            value={evaluadorId}
+            onChange={(e) => setEvaluadorId(e.target.value)}
+            className="w-full bg-bg border border-border rounded-lg px-3 py-2"
+          >
+            <option value="">— evaluador por defecto —</option>
+            {evaluadores.map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+          </select>
+        </label>
+
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted">FAQs comunes (por nivel)</span>
@@ -607,6 +734,46 @@ function DepartmentModal({
           <p className="text-xs text-muted -mt-1">
             Cada FAQ: pregunta + respuesta esperada + nivel. Se inyectan en la llamada según el nivel
             de la persona IA.
+          </p>
+
+          {/* Importar desde PDF/TXT (la IA estructura las FAQs) */}
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-border p-3 bg-bg/30">
+            <span className="text-xs text-muted">Importar PDF/TXT:</span>
+            <select
+              value={importNivel}
+              onChange={(e) => setImportNivel(e.target.value)}
+              className="text-xs bg-bg border border-border rounded-lg px-2 py-1"
+              title="Nivel a asignar (o que decida la IA)"
+            >
+              <option value="">nivel: que decida la IA</option>
+              {NIVELES.map((n) => <option key={n} value={n}>nivel: {n}</option>)}
+            </select>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".pdf,.txt,.md,text/plain,application/pdf"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) importMut.mutate(f);
+              }}
+            />
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={importMut.isPending}
+              className="text-xs rounded-lg border border-border px-3 py-1 hover:border-accent disabled:opacity-50"
+            >
+              {importMut.isPending ? "Extrayendo…" : "Elegir archivo"}
+            </button>
+            {importMut.isSuccess && (
+              <span className="text-xs text-emerald-300">+{importMut.data.faqs.length} FAQs añadidas (revísalas y guarda).</span>
+            )}
+            {importMut.isError && (
+              <span className="text-xs text-rose-400">No se pudo extraer (¿PDF escaneado? solo texto plano).</span>
+            )}
+          </div>
+          <p className="text-[11px] text-muted -mt-1">
+            La IA (misma API key del evaluador) extrae las FAQs en texto plano; no se admiten PDFs escaneados.
           </p>
           {!faqs.length ? (
             <p className="text-xs text-muted">Sin FAQs todavía. Añade la primera con “+ Añadir FAQ”.</p>
@@ -729,65 +896,135 @@ function EvaluarNivelButton({ comercial, onChanged }: { comercial: Comercial; on
   );
 }
 
-// ─── Evaluadores (cómo se puntúa la llamada) ─────────────────────────────────
+// ─── Evaluadores (catálogo reutilizable, se asignan a departamentos) ──────────
 
-function EvaluadoresPanel() {
-  const { data } = useQuery({ queryKey: ["sim-evaluadores"], queryFn: simulacrosApi.getEvaluadores });
-  if (!data) return <p className="text-muted">Cargando evaluadores…</p>;
-  return <EvaluadoresForm initial={data} />;
+function EvaluadoresCatalog() {
+  const qc = useQueryClient();
+  const { data: evaluadores } = useQuery({
+    queryKey: ["sim-evaluadores-cat"],
+    queryFn: simulacrosApi.listEvaluadores,
+  });
+  const [editing, setEditing] = useState<Evaluador | "new" | null>(null);
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["sim-evaluadores-cat"] });
+
+  return (
+    <section className="bg-card border border-border rounded-2xl p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold">Evaluadores</h3>
+          <p className="text-sm text-muted">
+            Cómo se puntúa la llamada (auditor + coach + composer + rúbrica). Se asigna uno a cada
+            departamento.
+          </p>
+        </div>
+        <button
+          onClick={() => setEditing("new")}
+          className="text-sm rounded-lg border border-border px-3 py-2 hover:border-accent"
+        >
+          + Nuevo evaluador
+        </button>
+      </div>
+      {!evaluadores?.length ? (
+        <p className="text-sm text-muted">Sin evaluadores. Crea el primero con “+ Nuevo evaluador”.</p>
+      ) : (
+        <div className="grid gap-2">
+          {evaluadores.map((e) => (
+            <div key={e.id} className="flex items-center justify-between rounded-xl border border-border px-4 py-2 bg-bg/40">
+              <div>
+                <span className="font-medium">{e.nombre}</span>
+                <span className="text-xs text-muted ml-2">{(e.rules_table?.length ?? 0)} parámetros</span>
+              </div>
+              <button onClick={() => setEditing(e)} className="text-sm text-accent hover:underline">Editar</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {editing && (
+        <EvaluadorModal
+          evaluador={editing === "new" ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); invalidate(); }}
+        />
+      )}
+    </section>
+  );
 }
 
-function EvaluadoresForm({ initial }: { initial: Evaluadores }) {
-  const qc = useQueryClient();
-  const [auditor, setAuditor] = useState(initial.auditor_prompt);
-  const [feedback, setFeedback] = useState(initial.feedback_prompt);
-  const [report, setReport] = useState(initial.report_prompt);
-  const [rubric, setRubric] = useState(JSON.stringify(initial.rules_table, null, 2));
+const EMPTY_EVALUADOR: EvaluadorInput = {
+  nombre: "", auditor_prompt: "", feedback_prompt: "", report_prompt: "", rules_table: [],
+};
+
+function EvaluadorModal({
+  evaluador, onClose, onSaved,
+}: {
+  evaluador: Evaluador | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [nombre, setNombre] = useState(evaluador?.nombre ?? "");
+  const [auditor, setAuditor] = useState(evaluador?.auditor_prompt ?? "");
+  const [feedback, setFeedback] = useState(evaluador?.feedback_prompt ?? "");
+  const [report, setReport] = useState(evaluador?.report_prompt ?? "");
+  const [rubric, setRubric] = useState(JSON.stringify(evaluador?.rules_table ?? EMPTY_EVALUADOR.rules_table, null, 2));
   const [err, setErr] = useState("");
+
   const save = useMutation({
     mutationFn: () => {
       let r: Array<Record<string, unknown>>;
       try { r = JSON.parse(rubric); } catch { throw new Error("La rúbrica (JSON) no es válida."); }
-      return simulacrosApi.putEvaluadores({
-        auditor_prompt: auditor, feedback_prompt: feedback, report_prompt: report, rules_table: r,
-      });
+      const body: EvaluadorInput = {
+        nombre: nombre.trim(), auditor_prompt: auditor, feedback_prompt: feedback,
+        report_prompt: report, rules_table: r,
+      };
+      return evaluador ? simulacrosApi.updateEvaluador(evaluador.id, body) : simulacrosApi.createEvaluador(body);
     },
-    onSuccess: () => { setErr(""); qc.invalidateQueries({ queryKey: ["sim-evaluadores"] }); },
+    onSuccess: () => { setErr(""); onSaved(); },
     onError: (e: unknown) => setErr(e instanceof Error ? e.message : "Error al guardar"),
+  });
+  const remove = useMutation({
+    mutationFn: () => evaluador ? simulacrosApi.deleteEvaluador(evaluador.id) : Promise.resolve(),
+    onSuccess: onSaved,
   });
 
   return (
-    <section className="bg-card border border-border rounded-2xl p-4 space-y-3">
-      <div>
-        <h3 className="text-lg font-semibold">Evaluadores — cómo se puntúa la llamada</h3>
-        <p className="text-sm text-muted">
-          Los “moderadores” que evalúan la transcripción. Edita sus instrucciones y la rúbrica.
-        </p>
+    <Modal title={evaluador ? `Editar evaluador — ${evaluador.nombre}` : "Nuevo evaluador"} onClose={onClose}>
+      <div className="space-y-3">
+        <Input label="Nombre del evaluador" value={nombre} onChange={setNombre} />
+        <TextArea label="Auditor (puntúa cada parámetro de la rúbrica)" value={auditor} onChange={setAuditor} rows={5} />
+        <TextArea label="Coach (redacta el feedback a la asesora)" value={feedback} onChange={setFeedback} rows={4} />
+        <TextArea label="Composer (redacta el informe)" value={report} onChange={setReport} rows={4} />
+        <label className="text-sm space-y-1 block">
+          <span className="text-muted">Rúbrica (JSON: id, name, weight, dimension, criteria, description)</span>
+          <textarea
+            value={rubric}
+            onChange={(e) => setRubric(e.target.value)}
+            rows={10}
+            className="w-full bg-bg border border-border rounded-lg px-3 py-2 font-mono text-xs resize-y"
+          />
+        </label>
+        {err && <p className="text-sm text-rose-400">{err}</p>}
       </div>
-      <TextArea label="Auditor (puntúa cada parámetro de la rúbrica)" value={auditor} onChange={setAuditor} rows={6} />
-      <TextArea label="Coach (redacta el feedback a la asesora)" value={feedback} onChange={setFeedback} rows={4} />
-      <TextArea label="Composer (redacta el informe)" value={report} onChange={setReport} rows={4} />
-      <label className="text-sm space-y-1 block">
-        <span className="text-muted">Rúbrica (JSON: id, name, weight, dimension, criteria, description)</span>
-        <textarea
-          value={rubric}
-          onChange={(e) => setRubric(e.target.value)}
-          rows={12}
-          className="w-full bg-bg border border-border rounded-lg px-3 py-2 font-mono text-xs resize-y"
-        />
-      </label>
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => save.mutate()}
-          disabled={save.isPending}
-          className="text-sm rounded-lg bg-accent text-black font-medium px-4 py-2 hover:opacity-90 disabled:opacity-50"
-        >
-          {save.isPending ? "Guardando…" : "Guardar evaluadores"}
-        </button>
-        {err && <span className="text-sm text-rose-400">{err}</span>}
-        {save.isSuccess && !err && <span className="text-sm text-emerald-300">Guardado.</span>}
+      <div className="flex items-center justify-between pt-4">
+        {evaluador ? (
+          <button
+            onClick={() => { if (confirm(`¿Borrar el evaluador “${evaluador.nombre}”?`)) remove.mutate(); }}
+            className="text-sm text-rose-400 hover:text-rose-300"
+          >
+            Borrar
+          </button>
+        ) : <span />}
+        <div className="flex gap-2">
+          <button onClick={onClose} className="text-sm rounded-lg border border-border px-3 py-2 hover:border-accent">Cancelar</button>
+          <button
+            onClick={() => save.mutate()}
+            disabled={save.isPending || !nombre.trim()}
+            className="text-sm rounded-lg bg-accent text-black font-medium px-3 py-2 hover:opacity-90 disabled:opacity-50"
+          >
+            {save.isPending ? "Guardando…" : "Guardar"}
+          </button>
+        </div>
       </div>
-    </section>
+    </Modal>
   );
 }
 

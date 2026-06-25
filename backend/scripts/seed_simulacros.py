@@ -17,8 +17,11 @@ from app.core.db import async_session
 from app.core.models import (
     QualityProject,
     SimulacroDepartamento,
+    SimulacroEvaluador,
     SimulacroScenario,
 )
+
+EVALUADOR_ID = "eva-general"
 
 DEPT_ID = "dep-oposiciones"
 DEPT_NIVELES = ["facil", "medio", "dificil"]
@@ -227,12 +230,24 @@ async def main() -> None:
             print(f"Updated project {proj.id}")
         await s.commit()
 
-        # Department "Oposiciones" with the configurable level system.
+        # Default evaluador (reusable catalog entry) from the project prompts.
+        ev = await s.get(SimulacroEvaluador, EVALUADOR_ID)
+        if ev is None:
+            ev = SimulacroEvaluador(
+                id=EVALUADOR_ID, nombre="Evaluador general",
+                auditor_prompt=AUDITOR_PROMPT, feedback_prompt=FEEDBACK_PROMPT,
+                report_prompt=REPORT_PROMPT, rules_table=RULES,
+            )
+            s.add(ev)
+            print(f"Created evaluador {EVALUADOR_ID}")
+        await s.commit()
+
+        # Department "Oposiciones".
         dept = await s.get(SimulacroDepartamento, DEPT_ID)
         if dept is None:
             dept = SimulacroDepartamento(
                 id=DEPT_ID, nombre="Oposiciones", niveles=DEPT_NIVELES,
-                reglas=DEPT_REGLAS, auto_evaluar=True,
+                reglas=DEPT_REGLAS, auto_evaluar=True, evaluador_id=EVALUADOR_ID,
                 project_id=settings.simulacros_project_id, activo=True,
             )
             s.add(dept)
@@ -241,6 +256,8 @@ async def main() -> None:
             dept.project_id = settings.simulacros_project_id
             if not dept.reglas:
                 dept.reglas = DEPT_REGLAS
+            if not dept.evaluador_id:
+                dept.evaluador_id = EVALUADOR_ID
             print(f"Department {DEPT_ID} already exists")
         await s.commit()
 

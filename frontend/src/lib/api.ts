@@ -54,6 +54,25 @@ async function request<T>(path: string, init: RequestInit & { json?: unknown } =
   return payload as T;
 }
 
+// Multipart (subida de ficheros): no fijamos Content-Type para que el navegador
+// ponga el boundary; sí adjuntamos el token de auth.
+async function requestForm<T>(path: string, form: FormData): Promise<T> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  const tok = getToken();
+  if (tok) headers["Authorization"] = `Bearer ${tok}`;
+  const r = await fetch(`${BASE}${path}`, { method: "POST", headers, body: form });
+  const ct = r.headers.get("content-type") || "";
+  const payload = ct.includes("application/json") ? await r.json() : await r.text();
+  if (!r.ok) {
+    if (r.status === 401 && !isLoginPath(path)) {
+      redirectToLogin();
+      return new Promise(() => {});
+    }
+    throw new ApiError(r.status, payload);
+  }
+  return payload as T;
+}
+
 // ── Tipos ────────────────────────────────────────────────────────────────────
 export interface LoginResp {
   access_token: string;
@@ -191,6 +210,7 @@ export interface Departamento {
   nombre: string;
   niveles: string[];          // fijos: facil/medio/dificil
   faqs: FaqItem[];            // FAQs comunes estructuradas, por nivel
+  evaluador_id: string | null;
   reglas: Array<Record<string, unknown>>;
   auto_evaluar: boolean;
   project_id: string | null;
@@ -199,11 +219,22 @@ export interface Departamento {
 export interface DepartamentoInput {
   nombre: string;
   faqs: FaqItem[];
+  evaluador_id?: string | null;
   reglas?: Array<Record<string, unknown>>;
   auto_evaluar?: boolean;
   project_id?: string | null;
   activo?: boolean;
 }
+
+export interface Evaluador {
+  id: string;
+  nombre: string;
+  auditor_prompt: string;
+  feedback_prompt: string;
+  report_prompt: string;
+  rules_table: Array<Record<string, unknown>>;
+}
+export type EvaluadorInput = Omit<Evaluador, "id">;
 
 export interface Evaluadores {
   project_id: string;
@@ -239,6 +270,9 @@ export interface AnnounceResult {
 }
 
 export const simulacrosApi = {
+  generarPersona: (data: { nombre: string; dificultad: string; descripcion?: string; department_id?: string | null }) =>
+    request<ScenarioInput>("/api/simulacros/personalidades/generar", { method: "POST", json: data }),
+
   listScenarios: () => request<Scenario[]>("/api/simulacros/scenarios"),
   createScenario: (data: ScenarioInput) =>
     request<Scenario>("/api/simulacros/scenarios", { method: "POST", json: data }),
@@ -262,6 +296,21 @@ export const simulacrosApi = {
     request<Departamento>(`/api/simulacros/departamentos/${encodeURIComponent(id)}`, { method: "PATCH", json: data }),
   deleteDepartamento: (id: string) =>
     request<void>(`/api/simulacros/departamentos/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  importFaqs: (file: File, nivel?: string) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (nivel) fd.append("nivel", nivel);
+    return requestForm<{ faqs: FaqItem[]; chars: number }>("/api/simulacros/faqs/parse", fd);
+  },
+
+  // Catálogo de evaluadores independientes
+  listEvaluadores: () => request<Evaluador[]>("/api/simulacros/evaluadores/catalogo"),
+  createEvaluador: (data: EvaluadorInput) =>
+    request<Evaluador>("/api/simulacros/evaluadores/catalogo", { method: "POST", json: data }),
+  updateEvaluador: (id: string, data: EvaluadorInput) =>
+    request<Evaluador>(`/api/simulacros/evaluadores/catalogo/${encodeURIComponent(id)}`, { method: "PATCH", json: data }),
+  deleteEvaluador: (id: string) =>
+    request<void>(`/api/simulacros/evaluadores/catalogo/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   evaluateLevel: (comercialId: string) =>
     request<LevelResult>(`/api/simulacros/comerciales/${encodeURIComponent(comercialId)}/evaluate-level`, { method: "POST" }),

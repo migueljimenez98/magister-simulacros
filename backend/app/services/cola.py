@@ -2,7 +2,7 @@
 
 Only ONE simulacro is "armed" for Retell at a time. Acquiring a turn arms the
 inbound match; the turn is RELEASED the instant the call CONNECTS (inbound-vars
-fires) — NOT when it ends (Retell allows concurrent calls) — or after a 30s
+fires) — NOT when it ends (Retell allows concurrent calls) — or after a 45s
 margin if the person never calls. The next person in the FIFO queue is then
 promoted automatically.
 
@@ -24,7 +24,7 @@ import time
 
 from ..core.config import settings
 
-HOLD_SECONDS = 30.0        # margin to start the call once it's your turn
+HOLD_SECONDS = 45.0        # margin to start the call once it's your turn
 WAITING_STALE = 12.0       # drop a waiting ticket whose panel stopped polling
 STARTED_TTL = 90.0         # how long we remember "your call connected" for the panel
 

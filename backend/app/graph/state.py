@@ -44,6 +44,8 @@ class AuditState(TypedDict, total=False):
     call_date: datetime | None
     instruction: str | None
     analysis_mode: Literal["statistical", "qualitative"]
+    # Per-department evaluador override: {rules_table, prompts}. Empty → project default.
+    evaluador_override: dict[str, Any]
 
     # Filled by ingest_retell
     crm_snapshot: dict[str, Any]

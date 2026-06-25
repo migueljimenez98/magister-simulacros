@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -34,10 +34,13 @@ from ..core.models import (
     QualityProject,
     SimulacroComercial,
     SimulacroDepartamento,
+    SimulacroEvaluador,
     SimulacroScenario,
 )
 from ..services import announce as announce_svc  # noqa: F401  (legacy, superseded by cola)
 from ..services import cola
+from ..services import faq_import
+from ..services import persona_gen
 from ..services import leveling
 from ..services import retell as retell_svc
 from .deps import SessionDep, current_user, get_audit_graph, require_role
@@ -55,6 +58,21 @@ cola_router = APIRouter(prefix="/simulacros/cola", tags=["simulacros-cola"])
 
 # Niveles de dificultad fijos en todo el sistema.
 NIVELES = ["facil", "medio", "dificil"]
+
+# Dimensión del auditor en la estructura de prompts del proyecto/evaluador.
+_AUDITOR_DIM = "informacion_telefonica"
+
+
+def _build_evaluador_prompts(auditor: str, feedback: str, report: str) -> dict[str, Any]:
+    """Construye la estructura de prompts que consume el grafo a partir de los
+    3 prompts de un evaluador."""
+    return {
+        "dimensions": {
+            _AUDITOR_DIM: {"label": "Simulacro (llamada)", "system_prompt": auditor or ""},
+        },
+        "feedback": {"system_prompt": feedback or ""},
+        "report": {"system_prompt": report or ""},
+    }
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -239,6 +257,26 @@ async def _common_faqs_for(
     return _faqs_to_text(dept.faqs, nivel)
 
 
+async def _evaluador_override_for(session: SessionDep, snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Resolve the evaluador assigned to the call's department (via the scenario)
+    and return its {rules_table, prompts} override. Empty dict → use the project
+    default."""
+    scenario = (snapshot.get("_simulacro") or {}).get("scenario") or {}
+    dept_id = scenario.get("department_id")
+    if not dept_id:
+        return {}
+    dept = await session.get(SimulacroDepartamento, dept_id)
+    if not dept or not dept.evaluador_id:
+        return {}
+    ev = await session.get(SimulacroEvaluador, dept.evaluador_id)
+    if not ev:
+        return {}
+    return {
+        "rules_table": ev.rules_table or [],
+        "prompts": _build_evaluador_prompts(ev.auditor_prompt, ev.feedback_prompt, ev.report_prompt),
+    }
+
+
 async def _run_simulacro_audit(
     graph,
     analysis_id: str,
@@ -246,6 +284,7 @@ async def _run_simulacro_audit(
     call_date: datetime | None,
     transcript: str,
     snapshot: dict[str, Any],
+    evaluador_override: dict[str, Any] | None = None,
 ) -> None:
     """Invoke the audit graph for a simulacro. The persist node writes the
     result back into the row keyed by analysis_id."""
@@ -259,6 +298,7 @@ async def _run_simulacro_audit(
                 "call_date": call_date,
                 "transcript": transcript,
                 "crm_snapshot": snapshot,
+                "evaluador_override": evaluador_override or {},
             },
             config={"configurable": {"thread_id": analysis_id}},
         )
@@ -320,8 +360,12 @@ async def _create_and_dispatch(
     await session.commit()
     await session.refresh(row)
 
+    # Resolve the department's evaluador (how its calls are scored) up front.
+    evaluador_override = await _evaluador_override_for(session, snapshot)
+
     background.add_task(
         _run_simulacro_audit, graph, row.id, agente, row.call_date, transcript, snapshot,
+        evaluador_override,
     )
     return row
 
@@ -646,6 +690,45 @@ async def delete_scenario(scenario_id: str, session: SessionDep) -> None:
     await session.commit()
 
 
+class GenerarPersonaIn(BaseModel):
+    nombre: str
+    dificultad: str = "medio"
+    descripcion: str = ""
+    department_id: str | None = None
+
+
+@simulacros_router.post(
+    "/personalidades/generar", dependencies=[Depends(require_role("admin"))],
+)
+async def generar_persona(data: GenerarPersonaIn, session: SessionDep) -> dict[str, Any]:
+    """Genera (con IA) una Persona IA enriquecida a partir de nombre + dificultad
+    + descripción, usando las FAQs del departamento de ese nivel. Devuelve un
+    BORRADOR (no se guarda) para revisar y guardar como personalidad."""
+    nombre = (data.nombre or "").strip()
+    if not nombre:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Falta el nombre de la persona")
+    nivel = data.dificultad if data.dificultad in NIVELES else "medio"
+    dept_nombre = ""
+    faqs_text = ""
+    if data.department_id:
+        dept = await session.get(SimulacroDepartamento, data.department_id)
+        if dept:
+            dept_nombre = dept.nombre
+            faqs_text = _faqs_to_text(dept.faqs or [], nivel)
+    draft = await persona_gen.generate(
+        nombre=nombre, dificultad=nivel, descripcion=data.descripcion,
+        dept_nombre=dept_nombre, faqs_text=faqs_text,
+    )
+    return {
+        "nombre": nombre,
+        "dificultad": nivel,
+        "department_id": data.department_id,
+        "retell_agent_id": "",
+        "activo": True,
+        **draft,  # persona, objeciones, faqs, guion, producto
+    }
+
+
 # ── Management: comerciales CRUD ─────────────────────────────────────────────
 
 
@@ -828,6 +911,7 @@ def _dept_to_dict(d: SimulacroDepartamento) -> dict[str, Any]:
         "nombre": d.nombre,
         "niveles": NIVELES,                    # fijos: facil/medio/dificil
         "faqs": d.faqs or [],                  # [{pregunta, respuesta_esperada, nivel}]
+        "evaluador_id": d.evaluador_id,
         "reglas": d.reglas or [],
         "auto_evaluar": d.auto_evaluar,
         "project_id": d.project_id,
@@ -844,6 +928,7 @@ class FaqItem(BaseModel):
 class DepartamentoIn(BaseModel):
     nombre: str
     faqs: list[FaqItem] = Field(default_factory=list)
+    evaluador_id: str | None = None
     # Escalado: se conserva en BD pero ya no se edita desde el alta del dpto.
     reglas: list[dict[str, Any]] = Field(default_factory=list)
     auto_evaluar: bool = True
@@ -895,12 +980,34 @@ async def delete_departamento(dept_id: str, session: SessionDep) -> None:
     await session.commit()
 
 
+@simulacros_router.post("/faqs/parse", dependencies=[Depends(require_role("admin"))])
+async def faqs_parse(
+    file: UploadFile = File(...),
+    nivel: str = Form(""),
+) -> dict[str, Any]:
+    """Subir un PDF/TXT de FAQs → un LLM (misma API key del evaluador) las
+    devuelve estructuradas (pregunta/respuesta_esperada/nivel) para previsualizar
+    y guardar en el departamento. Texto plano (sin OCR)."""
+    data = await file.read()
+    if not data:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Archivo vacío")
+    if len(data) > 5_000_000:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Máximo 5 MB")
+    text = faq_import.extract_text(file.filename or "", data)
+    if not text:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "No se pudo extraer texto (¿PDF escaneado? solo se admite texto plano).",
+        )
+    faqs = await faq_import.parse_faqs(text, (nivel or "").strip() or None)
+    return {"faqs": faqs, "chars": len(text)}
+
+
 # ── Management: evaluadores (prompts + rúbrica de cómo se puntúa) ─────────────
 
-# The "moderators" that score the call ARE the project's evaluator prompts +
-# rubric. We expose them under a friendly shape so a coordinator can edit how
-# the simulacro is judged without touching the projects internals.
-_AUDITOR_DIM = "informacion_telefonica"
+# The project's evaluator prompts + rubric are the DEFAULT (fallback when a
+# department has no evaluador assigned). The reusable catalog lives in
+# simulacro_evaluadores (see below).
 
 
 class EvaluadoresIn(BaseModel):
@@ -950,3 +1057,70 @@ async def update_evaluadores(data: EvaluadoresIn, session: SessionDep) -> dict[s
     p.rules_table = data.rules_table
     await session.commit()
     return _evaluadores_from_project(p)
+
+
+# ── Catálogo de evaluadores independientes (asignables a departamentos) ───────
+
+
+def _evaluador_to_dict(e: SimulacroEvaluador) -> dict[str, Any]:
+    return {
+        "id": e.id,
+        "nombre": e.nombre,
+        "auditor_prompt": e.auditor_prompt or "",
+        "feedback_prompt": e.feedback_prompt or "",
+        "report_prompt": e.report_prompt or "",
+        "rules_table": e.rules_table or [],
+    }
+
+
+class EvaluadorIn(BaseModel):
+    nombre: str
+    auditor_prompt: str = ""
+    feedback_prompt: str = ""
+    report_prompt: str = ""
+    rules_table: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@simulacros_router.get("/evaluadores/catalogo")
+async def list_evaluadores(session: SessionDep) -> list[dict[str, Any]]:
+    rows = (await session.execute(
+        select(SimulacroEvaluador).order_by(SimulacroEvaluador.nombre)
+    )).scalars().all()
+    return [_evaluador_to_dict(e) for e in rows]
+
+
+@simulacros_router.post(
+    "/evaluadores/catalogo", status_code=201, dependencies=[Depends(require_role("admin"))],
+)
+async def create_evaluador(data: EvaluadorIn, session: SessionDep) -> dict[str, Any]:
+    e = SimulacroEvaluador(**data.model_dump())
+    session.add(e)
+    await session.commit()
+    await session.refresh(e)
+    return _evaluador_to_dict(e)
+
+
+@simulacros_router.patch(
+    "/evaluadores/catalogo/{evaluador_id}", dependencies=[Depends(require_role("admin"))],
+)
+async def update_evaluador(evaluador_id: str, data: EvaluadorIn, session: SessionDep) -> dict[str, Any]:
+    e = await session.get(SimulacroEvaluador, evaluador_id)
+    if not e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Evaluador no encontrado")
+    for k, v in data.model_dump().items():
+        setattr(e, k, v)
+    await session.commit()
+    await session.refresh(e)
+    return _evaluador_to_dict(e)
+
+
+@simulacros_router.delete(
+    "/evaluadores/catalogo/{evaluador_id}", status_code=204,
+    dependencies=[Depends(require_role("admin"))],
+)
+async def delete_evaluador(evaluador_id: str, session: SessionDep) -> None:
+    e = await session.get(SimulacroEvaluador, evaluador_id)
+    if not e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Evaluador no encontrado")
+    await session.delete(e)
+    await session.commit()

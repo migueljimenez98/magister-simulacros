@@ -32,20 +32,27 @@ async def run(state: AuditState) -> dict:
     project_id = state.get("project_id")
     transcript = state.get("transcript") or ""
 
+    # An evaluador assigned to the call's department overrides HOW it is scored
+    # (rules_table + auditor/coach/composer prompts). Empty → use the project
+    # default. The project is still loaded for KB collection / config / mode.
+    override = state.get("evaluador_override") or {}
+    ov_rules = override.get("rules_table")
+    ov_prompts = override.get("prompts")
+
     # 1) Short session — just load the project. Closes BEFORE the slow
     # embedding call below so the connection returns to the pool.
     project = await _load_project(project_id)
 
     # If fetch_crm already marked the audit as failed, short-circuit.
     if state.get("status") == "failed":
-        rules = (project.rules_table if project else []) or []
+        rules = ov_rules or (project.rules_table if project else []) or []
         cfg = (project.config if project else {}) or {}
         return {
             "status": "failed",
             "rules_table": rules,
             "kb_context": [],
             "analysis_mode": (project.analysis_mode if project else "statistical"),
-            "prompts": normalize_prompts(project.prompts if project else None),
+            "prompts": normalize_prompts(ov_prompts or (project.prompts if project else None)),
             "standing_instruction": cfg.get("standing_instruction", ""),
             "project_config": cfg,
         }
@@ -58,7 +65,7 @@ async def run(state: AuditState) -> dict:
             "kb_context": [],
         }
 
-    rules = project.rules_table or []
+    rules = ov_rules if ov_rules else (project.rules_table or [])
     if not rules:
         return {
             "status": "failed",
@@ -69,7 +76,7 @@ async def run(state: AuditState) -> dict:
 
     analysis_mode = project.analysis_mode or "statistical"
     collection_id = project.kb_collection_id
-    project_prompts = project.prompts
+    project_prompts = ov_prompts or project.prompts
     project_config = project.config or {}
     # `project` is detached from the session here — we copied what we need.
 

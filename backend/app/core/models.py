@@ -190,6 +190,11 @@ class SimulacroDepartamento(Base):
     project_id: Mapped[str | None] = mapped_column(
         String(64), ForeignKey("quality_projects.id", ondelete="SET NULL")
     )
+    # Evaluador asignado (cómo se puntúan SUS llamadas). Null → usa el default
+    # del proyecto de simulacros.
+    evaluador_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("simulacro_evaluadores.id", ondelete="SET NULL")
+    )
     activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -243,6 +248,28 @@ class SimulacroComercial(Base):
     nivel: Mapped[str | None] = mapped_column(String(32))
     default_scenario_id: Mapped[str | None] = mapped_column(
         String(64), ForeignKey("simulacro_scenarios.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class SimulacroEvaluador(Base):
+    """Reusable scoring config (auditor/coach/composer prompts + rubric). Created
+    independently and assigned to a departamento via `evaluador_id`. Defines how
+    that department's calls are judged."""
+    __tablename__ = "simulacro_evaluadores"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: _id("eva"))
+    nombre: Mapped[str] = mapped_column(String(160), nullable=False)
+    auditor_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    feedback_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    report_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    rules_table: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

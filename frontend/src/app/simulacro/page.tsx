@@ -74,12 +74,6 @@ export default function SimulacroPage() {
           <p className="text-sm text-muted">Practica una llamada con el alumno IA.</p>
         </div>
 
-        {/* Número a marcar — siempre visible */}
-        <div className="bg-card border border-border rounded-2xl p-4 text-center">
-          <p className="text-xs uppercase tracking-wide text-muted">Número a llamar</p>
-          <p className="text-2xl font-bold tabular-nums mt-1 select-all">{numFmt}</p>
-        </div>
-
         {/* Formulario (cuando no hay turno en curso) */}
         {!ticket || st === "expired" ? (
           <div className="bg-card border border-border rounded-2xl p-5 space-y-3">
@@ -106,14 +100,18 @@ export default function SimulacroPage() {
             >
               {loading ? "Iniciando…" : "Iniciar simulacro"}
             </button>
+            <p className="text-xs text-muted text-center">
+              Pulsa “Iniciar simulacro” y <strong>después</strong> te diremos a qué número llamar.
+            </p>
             {error && <p className="text-sm text-rose-400">{error}</p>}
           </div>
         ) : st === "active" ? (
-          <div className="bg-card border border-emerald-700 rounded-2xl p-5 space-y-3 text-center">
-            <p className="text-lg font-semibold text-emerald-300">¡Es tu turno!</p>
-            <p className="text-base">
-              Inicia el simulacro: ya puedes llamar a <strong className="select-all">{numFmt}</strong>.
-            </p>
+          <div className="bg-card border border-emerald-700 rounded-2xl p-5 space-y-4 text-center">
+            <p className="text-lg font-semibold text-emerald-300">¡Es tu turno! Llama ahora</p>
+            <div className="rounded-xl border border-emerald-700 bg-emerald-950/20 py-3">
+              <p className="text-xs uppercase tracking-wide text-muted">Llama a este número</p>
+              <p className="text-3xl font-bold tabular-nums mt-1 select-all text-emerald-200">{numFmt}</p>
+            </div>
             {typeof state?.seconds_left === "number" && (
               <p className="text-sm text-muted">
                 Tienes <span className="tabular-nums font-semibold">{state.seconds_left}s</span> para empezar la llamada.
