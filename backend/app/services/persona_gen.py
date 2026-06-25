@@ -23,7 +23,7 @@ class _PersonaDraft(BaseModel):
     objeciones: str = Field("", description="Objeciones que pondrá durante la llamada.")
     faqs: str = Field("", description="Dudas/FAQs propias de esta persona (texto).")
     guion: str = Field("", description="Situación/guion: motivo de la llamada y cómo se comporta.")
-    producto: str = Field("", description="Producto/servicio sobre el que llama.")
+    producto: str = Field("", description="Producto/servicio (etiqueta CORTA, máx ~8 palabras).")
 
 
 _INSTRUCTIONS = """Eres un diseñador de simulacros de formación para asesoras comerciales.
@@ -35,7 +35,7 @@ coherente. Devuelve:
 - objeciones: las objeciones concretas que pondrá (acordes al nivel: más duras si es dificil).
 - faqs: dudas propias de esta persona (puedes apoyarte en las FAQs del departamento).
 - guion: la situación y el motivo de la llamada, y cómo evoluciona según la asesora.
-- producto: el producto/servicio sobre el que va la llamada.
+- producto: el producto/servicio sobre el que va la llamada (ETIQUETA CORTA, máx ~8 palabras).
 Sé concreto y verosímil. Respeta el nivel de dificultad pedido. Escribe en español."""
 
 

@@ -25,7 +25,7 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 
 from ..core.config import settings
@@ -645,6 +645,18 @@ class ScenarioIn(BaseModel):
     def _empty_to_none(cls, v):
         # An empty string for an FK column raises a 500 (constraint). Coerce "" → None.
         return v or None
+
+    @model_validator(mode="after")
+    def _truncate_strings(self) -> "ScenarioIn":
+        # Safety net: never overflow the varchar columns (the AI-generated
+        # `producto` was exceeding its limit and 500'ing the insert).
+        self.nombre = (self.nombre or "")[:200]
+        self.dificultad = (self.dificultad or "medio")[:32]
+        if self.producto:
+            self.producto = self.producto[:500]
+        if self.retell_agent_id:
+            self.retell_agent_id = self.retell_agent_id[:120]
+        return self
 
 
 @simulacros_router.get("/scenarios")

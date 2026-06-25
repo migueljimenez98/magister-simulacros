@@ -216,7 +216,7 @@ class SimulacroScenario(Base):
     )
     nombre: Mapped[str] = mapped_column(String(200), nullable=False)
     dificultad: Mapped[str] = mapped_column(String(32), nullable=False, default="medio")
-    producto: Mapped[str | None] = mapped_column(String(120))
+    producto: Mapped[str | None] = mapped_column(String(500))
     persona: Mapped[str] = mapped_column(Text, nullable=False, default="")
     objeciones: Mapped[str] = mapped_column(Text, nullable=False, default="")
     faqs: Mapped[str] = mapped_column(Text, nullable=False, default="")
