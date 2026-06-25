@@ -19,10 +19,13 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY scripts ./scripts
+COPY start.sh ./
 # Docs (guión, plantillas) for the coach KB grounding — baked into the image
 # so kb_bootstrap can ingest them at startup (no volume needed on Render).
 COPY docs ./docs
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# start.sh: migra + siembra + uvicorn ($PORT). Invocado con `sh` para no
+# depender del bit de ejecución (Windows no lo conserva).
+CMD ["sh", "start.sh"]

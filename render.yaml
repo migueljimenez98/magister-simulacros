@@ -16,7 +16,8 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /health
-    dockerCommand: sh -c "alembic upgrade head && (python -m scripts.seed_simulacros || true) && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    # Sin dockerCommand: el CMD del Dockerfile (sh start.sh) hace migración +
+    # seed + uvicorn. Evita el doble `sh -c` de Render que rompía el quoting.
     envVars:
       - key: ENVIRONMENT
         value: production
