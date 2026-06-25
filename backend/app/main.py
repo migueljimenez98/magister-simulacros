@@ -80,9 +80,10 @@ async def health() -> dict:
 
 
 from .api import analyses, auth  # noqa: E402
-from .api.retell import retell_router, simulacros_router  # noqa: E402
+from .api.retell import cola_router, retell_router, simulacros_router  # noqa: E402
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(analyses.router, prefix="/api")
 app.include_router(retell_router, prefix="/api")
+app.include_router(cola_router, prefix="/api")        # público (panel sin login)
 app.include_router(simulacros_router, prefix="/api")

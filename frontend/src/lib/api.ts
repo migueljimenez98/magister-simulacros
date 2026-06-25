@@ -267,5 +267,30 @@ export const simulacrosApi = {
 
   announce: (data: { agente_nombre: string; from_number?: string; scenario_id?: string }) =>
     request<AnnounceResult>("/api/simulacros/announce", { method: "POST", json: data }),
-  announcePending: () => request<AnnouncePending[]>("/api/simulacros/announce/pending"),
+};
+
+// ── Cola pública (panel /simulacro, sin login) ────────────────────────────────
+export interface ColaStatus {
+  status: "active" | "waiting" | "started" | "expired";
+  numero: string;
+  nombre?: string;
+  seconds_left?: number;   // solo en "active"
+  position?: number;       // solo en "waiting"
+  ahead?: number;
+}
+export interface ColaJoinResult extends ColaStatus {
+  ticket: string;
+  escenario?: string | null;
+  dificultad?: string | null;
+}
+
+export const colaApi = {
+  info: () => request<{ numero: string }>("/api/simulacros/cola/info"),
+  join: (nombre: string, from_number?: string) =>
+    request<ColaJoinResult>("/api/simulacros/cola/join", {
+      method: "POST",
+      json: { nombre, from_number: from_number ?? "" },
+    }),
+  status: (ticket: string) =>
+    request<ColaStatus>(`/api/simulacros/cola/status?ticket=${encodeURIComponent(ticket)}`),
 };

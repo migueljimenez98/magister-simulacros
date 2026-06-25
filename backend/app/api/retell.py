@@ -36,7 +36,8 @@ from ..core.models import (
     SimulacroDepartamento,
     SimulacroScenario,
 )
-from ..services import announce as announce_svc
+from ..services import announce as announce_svc  # noqa: F401  (legacy, superseded by cola)
+from ..services import cola
 from ..services import leveling
 from ..services import retell as retell_svc
 from .deps import SessionDep, current_user, get_audit_graph, require_role
@@ -49,6 +50,8 @@ simulacros_router = APIRouter(
     tags=["simulacros"],
     dependencies=[Depends(current_user)],
 )
+# Public (no login): the self-service "Iniciar simulacro" panel + its turn queue.
+cola_router = APIRouter(prefix="/simulacros/cola", tags=["simulacros-cola"])
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -338,7 +341,9 @@ async def inbound_dynamic_variables(request: Request, session: SessionDep) -> di
     announced_name: str | None = None
     announced_scenario: str = ""
     if comercial is None:
-        announced = announce_svc.match_and_consume(from_number)
+        # Call connected → take the armed turn and RELEASE the queue slot
+        # (promotes the next person). One armed slot at a time.
+        announced = cola.match_and_consume(from_number)
         if announced:
             via = "announce"
             announced_name = announced["agente"]
@@ -718,7 +723,8 @@ async def _process_announce(
     )).scalar_one_or_none()
     scenario = await _pick_scenario(session, comercial, explicit_id=scenario_id or None)
 
-    announce_svc.announce(agente_nombre, from_number, scenario.id if scenario else "")
+    # CRM / Dev simulator: the call is imminent → claim the turn now.
+    cola.take_now(agente_nombre, from_number, scenario.id if scenario else "")
     log.info(
         "simulacro_announce",
         agente=agente_nombre,
@@ -744,9 +750,47 @@ async def announce_call(data: AnnounceIn, session: SessionDep) -> dict[str, Any]
 
 
 @simulacros_router.get("/announce/pending")
-async def announce_pending() -> list[dict[str, Any]]:
-    """Debug: announcements still waiting to be matched to a call."""
-    return announce_svc.pending()
+async def announce_pending() -> dict[str, Any]:
+    """Debug: the active turn + the waiting queue."""
+    return cola.snapshot()
+
+
+# ── Public: self-service "Iniciar simulacro" panel + turn queue ──────────────
+
+
+class ColaJoinIn(BaseModel):
+    nombre: str
+    from_number: str = ""
+
+
+@cola_router.post("/join")
+async def cola_join(data: ColaJoinIn, session: SessionDep) -> dict[str, Any]:
+    """Public (no login): request a turn for a self-service simulacro. Seals the
+    guión by the tracking name's level (random if unknown) and either arms it now
+    (slot free) or queues it. The panel polls /status with the returned ticket."""
+    nombre = (data.nombre or "").strip()
+    if not nombre:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Falta el nombre de seguimiento")
+    comercial = (await session.execute(
+        select(SimulacroComercial).where(SimulacroComercial.nombre == nombre)
+    )).scalar_one_or_none()
+    scenario = await _pick_scenario(session, comercial, explicit_id=None)
+    res = cola.join(nombre, data.from_number, scenario.id if scenario else "")
+    res["escenario"] = scenario.nombre if scenario else None
+    res["dificultad"] = scenario.dificultad if scenario else None
+    return res
+
+
+@cola_router.get("/status")
+async def cola_status(ticket: str) -> dict[str, Any]:
+    """Public: poll a ticket's turn status (keeps the panel's place alive)."""
+    return cola.poll(ticket)
+
+
+@cola_router.get("/info")
+async def cola_info() -> dict[str, Any]:
+    """Public: the phone number to call for the self-service panel."""
+    return {"numero": settings.retell_from_number or ""}
 
 
 @simulacros_router.post("/comerciales/{comercial_id}/evaluate-level")
