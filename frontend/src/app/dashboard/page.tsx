@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   api, simulacrosApi,
-  type AgenteRow, type Departamento,
+  type AgenteRow, type Departamento, type ParamScore,
 } from "@/lib/api";
 import { nota10, notaHsl } from "@/lib/score";
 
@@ -251,6 +251,7 @@ function AgenteDetailModal({
 }) {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
+  const [verCall, setVerCall] = useState<string | null>(null);
   const { data: historial } = useQuery({
     queryKey: ["agente-historial", agente.agente],
     queryFn: () => api.analyses.list({ agente: agente.agente, limit: 50 }),
@@ -316,7 +317,7 @@ function AgenteDetailModal({
                     <td className="px-3 py-1.5 text-muted truncate max-w-[160px]">{r.escenario || "—"}</td>
                     <td className="px-3 py-1.5"><Nota v={r.percent_quality} /></td>
                     <td className="px-3 py-1.5 text-right">
-                      <Link href={`/dashboard/detail?id=${r.id}`} className="text-accent hover:underline">Ver</Link>
+                      <button onClick={() => setVerCall(r.id)} className="text-accent hover:underline">Ver</button>
                     </td>
                   </tr>
                 ))}
@@ -325,6 +326,85 @@ function AgenteDetailModal({
           </div>
         </div>
       </div>
+      {verCall && <CallDetailModal id={verCall} onClose={() => setVerCall(null)} />}
+    </Modal>
+  );
+}
+
+function CallDetailModal({ id, onClose }: { id: string; onClose: () => void }) {
+  const { data: a, isLoading } = useQuery({ queryKey: ["analysis-detail", id], queryFn: () => api.analyses.get(id) });
+  const snap = (a?.crm_snapshot || {}) as Record<string, unknown>;
+  const sim = (snap._simulacro || {}) as Record<string, unknown>;
+  const transcript =
+    (typeof snap.transcript === "string" && snap.transcript) ||
+    (typeof sim.transcript === "string" && sim.transcript) || "";
+  const scores = a ? (Object.entries(a.scores || {}) as [string, ParamScore][]) : [];
+  return (
+    <Modal title={a ? `Simulacro — ${a.agente_nombre}` : "Simulacro"} onClose={onClose} wide>
+      {isLoading || !a ? <p className="text-muted">Cargando…</p> : (
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 text-sm">
+            <span className="font-semibold"><Nota v={a.percent_quality} /> <span className="text-muted text-xs">/10</span></span>
+            {a.escenario && <span className="text-muted">· {a.escenario}</span>}
+            {a.departamento && <span className="text-muted">· {a.departamento}</span>}
+            <span className="text-muted text-xs">{fdate(a.created_at)}</span>
+          </div>
+          {a.error && (
+            <div className="text-sm rounded-lg border border-rose-800 bg-rose-950/30 p-3 text-rose-200"><strong>Error:</strong> {a.error}</div>
+          )}
+          {a.feedback_message && (
+            <section>
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted mb-1">Feedback a la asesora (coach)</h4>
+              <p className="text-zinc-200 whitespace-pre-wrap text-sm">{a.feedback_message}</p>
+            </section>
+          )}
+          {scores.length > 0 && (
+            <section>
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted mb-1">Evaluación por parámetro (moderador)</h4>
+              <div className="rounded-xl border border-border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-bg/50 text-muted text-left">
+                    <tr>
+                      <th className="px-3 py-1.5 font-medium">Parámetro</th>
+                      <th className="px-3 py-1.5 font-medium">Nota</th>
+                      <th className="px-3 py-1.5 font-medium">Qué dijo el moderador</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scores.map(([rid, s]) => (
+                      <tr key={rid} className="border-t border-border align-top">
+                        <td className="px-3 py-1.5 font-medium">{rid}</td>
+                        <td className="px-3 py-1.5 tabular-nums whitespace-nowrap">{s.applied === false ? "n/a" : `${s.score ?? 0}/${s.max ?? 0}`}</td>
+                        <td className="px-3 py-1.5 text-muted">
+                          {s.observacion || s.gap || s.note || "—"}
+                          {s.evidencia?.[0] && <div className="text-xs text-zinc-500 mt-1 italic">“{s.evidencia[0]}”</div>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+          {a.detailed_report && (
+            <section>
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted mb-1">Informe (composer)</h4>
+              <p className="text-zinc-200 whitespace-pre-wrap text-sm">{a.detailed_report}</p>
+            </section>
+          )}
+          {transcript ? (
+            <section>
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted mb-1">Transcripción</h4>
+              <pre className="overflow-auto bg-bg border border-border rounded-lg p-3 text-sm text-zinc-200 whitespace-pre-wrap font-mono leading-relaxed" style={{ maxHeight: 360 }}>{transcript}</pre>
+            </section>
+          ) : (
+            <p className="text-xs text-muted">Sin transcripción guardada para esta llamada.</p>
+          )}
+          <div className="flex justify-end">
+            <Link href={`/dashboard/detail?id=${id}`} className="text-sm text-accent hover:underline">Abrir en página completa →</Link>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }
