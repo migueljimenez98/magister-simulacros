@@ -14,7 +14,7 @@ import structlog
 from sqlalchemy import update
 
 from ...core.db import get_session
-from ...core.models import QualityAnalysis
+from ...core.models import QualityAnalysis, SimulacroDepartamento
 from ..state import AuditState
 
 log = structlog.get_logger()
@@ -34,12 +34,30 @@ async def run(state: AuditState) -> dict:
     scores = state.get("scores") or {}
     errors = state.get("errors") or []
 
-    has_scoring = any(
-        s.get("applied") and (s.get("score") or 0) > 0 for s in scores.values()
-    )
+    # Status semantics: "failed" means the audit could NOT run, NOT that the
+    # call scored badly. A call where every parameter was evaluated but scored
+    # 0 is a legitimate (bad) simulacro → "done" with 0%. We only mark "failed"
+    # when the call was blocked (no transcript), there was nothing to score, or
+    # the auditor itself errored on EVERY parameter (gap == "scoring_error",
+    # set by score_param's except branch — typically a missing/invalid LLM key).
+    applied = [s for s in scores.values() if s.get("applied")]
+    errored = [s for s in applied if s.get("gap") == "scoring_error"]
+    scored_ok = len(applied) > len(errored)  # ≥1 parameter got a real verdict
     has_blocked = state.get("crm_snapshot", {}).get("status") == "blocked"
-    final_status = "done" if has_scoring and not has_blocked else "failed"
+    final_status = "done" if scored_ok and not has_blocked else "failed"
     error_text = "\n".join(errors)[:4000] if errors else None
+
+    # Denormalize guión + departamento for the results table.
+    sim = (state.get("crm_snapshot") or {}).get("_simulacro") or {}
+    scenario = sim.get("scenario") or {}
+    escenario = (scenario.get("nombre") or "").strip() or None
+    departamento = None
+    dept_id = scenario.get("department_id")
+    if dept_id:
+        async with get_session() as s:
+            dept = await s.get(SimulacroDepartamento, dept_id)
+            if dept:
+                departamento = dept.nombre
 
     update_values: dict[str, Any] = dict(
         scores=scores,
@@ -53,6 +71,8 @@ async def run(state: AuditState) -> dict:
         coach_validation_notes=state.get("coach_validation_notes") or [],
         detailed_report=state.get("detailed_report") or None,
         crm_snapshot=state.get("crm_snapshot") or {},
+        escenario=escenario,
+        departamento=departamento,
         status=final_status,
         error=error_text,
         updated_at=datetime.now(timezone.utc),

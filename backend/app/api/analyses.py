@@ -21,6 +21,8 @@ class AnalysisOut(BaseModel):
     project_id: str
     numero: str
     agente_nombre: str
+    escenario: str | None = None
+    departamento: str | None = None
     call_date: datetime | None
     status: str
     total_score: float | None
@@ -55,7 +57,8 @@ class AnalysisListOut(BaseModel):
 
 _LIST_COLUMNS = (
     QualityAnalysis.id, QualityAnalysis.project_id, QualityAnalysis.numero,
-    QualityAnalysis.agente_nombre, QualityAnalysis.call_date, QualityAnalysis.status,
+    QualityAnalysis.agente_nombre, QualityAnalysis.escenario, QualityAnalysis.departamento,
+    QualityAnalysis.call_date, QualityAnalysis.status,
     QualityAnalysis.total_score, QualityAnalysis.ideal_score, QualityAnalysis.percent_quality,
     QualityAnalysis.feedback_message, QualityAnalysis.error, QualityAnalysis.created_at,
     QualityAnalysis.updated_at, QualityAnalysis.scores, QualityAnalysis.scores_by_dimension,

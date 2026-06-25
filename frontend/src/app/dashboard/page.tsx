@@ -50,6 +50,8 @@ export default function ResultadosPage() {
             <thead className="bg-bg/50 text-muted text-left">
               <tr>
                 <th className="px-4 py-2 font-medium">Comercial</th>
+                <th className="px-4 py-2 font-medium">Departamento</th>
+                <th className="px-4 py-2 font-medium">Guion</th>
                 <th className="px-4 py-2 font-medium">Nota</th>
                 <th className="px-4 py-2 font-medium">Feedback</th>
                 <th className="px-4 py-2 font-medium">Estado</th>
@@ -64,6 +66,8 @@ export default function ResultadosPage() {
                       {r.agente_nombre}
                     </Link>
                   </td>
+                  <td className="px-4 py-2 text-muted whitespace-nowrap">{r.departamento || "—"}</td>
+                  <td className="px-4 py-2 text-muted truncate max-w-[240px]">{r.escenario || "—"}</td>
                   <td className="px-4 py-2 font-semibold tabular-nums">{pct(r.percent_quality)}</td>
                   <td className="px-4 py-2 text-muted truncate max-w-[420px]">
                     {r.feedback_message || (r.status === "done" ? "(sin observaciones)" : "—")}

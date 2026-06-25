@@ -87,6 +87,8 @@ export interface Analysis {
   project_id: string;
   numero: string;
   agente_nombre: string;
+  escenario?: string | null;
+  departamento?: string | null;
   call_date: string | null;
   status: "pending" | "fetching" | "scoring" | "composing" | "persisting" | "done" | "failed";
   total_score: number | null;

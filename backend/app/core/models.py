@@ -84,6 +84,10 @@ class QualityAnalysis(Base):
     )
     numero: Mapped[str] = mapped_column(String(64), nullable=False, default="simulacro", index=True)
     agente_nombre: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Denormalized for the results table (like agente_nombre): which guión was
+    # used and which departamento it belongs to. Written by the persist node.
+    escenario: Mapped[str | None] = mapped_column(String(200))
+    departamento: Mapped[str | None] = mapped_column(String(120))
     call_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     instruction: Mapped[str | None] = mapped_column(Text)
 
