@@ -58,6 +58,7 @@ export default function SimulacrosPage() {
   const [deptModal, setDeptModal] = useState<Departamento | "new" | null>(null);
   const [generarModal, setGenerarModal] = useState<{ departmentId: string | null } | null>(null);
   const [testing, setTesting] = useState<Scenario | null>(null);
+  const [selectedDept, setSelectedDept] = useState("");
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["sim-scenarios"] });
@@ -72,16 +73,21 @@ export default function SimulacrosPage() {
     (s) => !s.department_id || !knownDeptIds.has(s.department_id),
   );
 
+  const deptsToShow = deptList.filter((d) => !selectedDept || d.id === selectedDept);
+
   return (
-    <div className="space-y-8 max-w-[1400px] mx-auto">
+    <div className="w-full space-y-8">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="text-xl font-semibold">Simulacros</h2>
-          <p className="text-sm text-muted">
-            Cada <strong>departamento</strong> agrupa sus <strong>personalidades</strong> (personas IA
-            por dificultad), su evaluador y sus FAQs comunes por nivel. Los agentes se gestionan en
-            la pestaña “Agentes”.
-          </p>
+        <div className="flex items-center gap-4 flex-wrap">
+          <h2 className="text-xl font-semibold">Configuración</h2>
+          <select
+            value={selectedDept}
+            onChange={(e) => setSelectedDept(e.target.value)}
+            className="text-sm bg-bg border border-border rounded-lg px-3 py-2"
+          >
+            <option value="">Todos los departamentos</option>
+            {deptList.map((d) => <option key={d.id} value={d.id}>{d.nombre}</option>)}
+          </select>
         </div>
         <button
           onClick={() => setDeptModal("new")}
@@ -99,7 +105,7 @@ export default function SimulacrosPage() {
         </p>
       ) : (
         <div className="space-y-6">
-          {deptList.map((dept) => (
+          {deptsToShow.map((dept) => (
             <DepartmentSection
               key={dept.id}
               dept={dept}

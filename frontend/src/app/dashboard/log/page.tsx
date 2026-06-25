@@ -32,7 +32,7 @@ export default function LogLlamadasPage() {
   const items = data?.items ?? [];
 
   return (
-    <div className="space-y-5 max-w-[1200px] mx-auto">
+    <div className="w-full space-y-5">
       <div>
         <h2 className="text-xl font-semibold">Log de llamadas</h2>
         <p className="text-sm text-muted">

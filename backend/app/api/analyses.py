@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 
 from ..core.config import settings
-from ..core.models import QualityAnalysis, QualityProject, SimulacroComercial
+from ..core.models import QualityAnalysis, QualityProject, SimulacroComercial, SimulacroDepartamento
 from .deps import SessionDep, current_user, get_audit_graph, require_role
 
 _NIVEL_ORDER = ["facil", "medio", "dificil"]
@@ -166,9 +166,13 @@ async def stats(
     project = await session.get(QualityProject, settings.simulacros_project_id)
     rule_names = {r.get("id"): (r.get("name") or r.get("id")) for r in (project.rules_table or [])} if project else {}
 
-    # Comercial → current level (of their ACTIVE department membership).
+    # Memberships per agent + department names.
     comerciales = (await session.execute(select(SimulacroComercial))).scalars().all()
-    nivel_by_name = {c.nombre: c.nivel for c in comerciales if c.activo}
+    deptos = (await session.execute(select(SimulacroDepartamento))).scalars().all()
+    dept_name = {d.id: d.nombre for d in deptos}
+    memb_by_name: dict[str, list[SimulacroComercial]] = {}
+    for c in comerciales:
+        memb_by_name.setdefault(c.nombre, []).append(c)
 
     total = len(rows)
     by_status: dict[str, int] = {}
@@ -176,17 +180,21 @@ async def stats(
     ts: dict[str, list[float]] = {}              # date -> percents
     por_param: dict[str, list[float]] = {}       # rule_id -> score% list
     por_dif: dict[str, list[float]] = {}         # dificultad -> percents
-    por_ag: dict[str, list[float]] = {}          # agente -> percents
-    ag_count: dict[str, int] = {}
-    agentes_set, deptos_set = set(), set()
+    por_ag: dict[str, list[float]] = {}          # agente -> scored percents
+    ag_count: dict[str, int] = {}                # agente -> total calls
+    ag_last: dict[str, dict[str, Any]] = {}      # agente -> last call info
 
     for agente_nombre, depto, st, pq, scores, snap, created in rows:
         by_status[st] = by_status.get(st, 0) + 1
         if agente_nombre:
-            agentes_set.add(agente_nombre)
             ag_count[agente_nombre] = ag_count.get(agente_nombre, 0) + 1
-        if depto:
-            deptos_set.add(depto)
+            # rows are ascending by created_at → keep overwriting = most recent.
+            ag_last[agente_nombre] = {
+                "fecha": created.isoformat() if created else None,
+                "nota": float(pq) if pq is not None else None,
+                "departamento": depto,
+                "status": st,
+            }
         if st != "done" or pq is None:
             continue
         p = float(pq)
@@ -195,11 +203,9 @@ async def stats(
         ts.setdefault(day, []).append(p)
         if agente_nombre:
             por_ag.setdefault(agente_nombre, []).append(p)
-        # dificultad desde el snapshot
         dif = (((snap or {}).get("_simulacro") or {}).get("scenario") or {}).get("dificultad")
         if dif:
             por_dif.setdefault(dif, []).append(p)
-        # por parámetro
         for rid, sc in (scores or {}).items():
             if not isinstance(sc, dict) or not sc.get("applied"):
                 continue
@@ -212,6 +218,44 @@ async def stats(
     def _avg(xs: list[float]) -> float | None:
         return round(sum(xs) / len(xs), 1) if xs else None
 
+    def _memberships(nombre: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": m.id,
+                "departamento": dept_name.get(m.department_id) or "(sin departamento)",
+                "department_id": m.department_id, "nivel": m.nivel, "activo": m.activo,
+            }
+            for m in memb_by_name.get(nombre, [])
+        ]
+
+    # Which agents to show: filtered by the selected department (active there) +
+    # any agent with calls in the filtered set; all of them when no filter.
+    if departamento:
+        names = {n for n, ms in memb_by_name.items()
+                 if any(m.activo and dept_name.get(m.department_id) == departamento for m in ms)}
+        names |= set(ag_count.keys())
+    else:
+        names = set(memb_by_name.keys()) | set(ag_count.keys())
+
+    por_agente = []
+    for n in names:
+        membs = _memberships(n)
+        activa = next((m for m in membs if m["activo"]), None)
+        avg = _avg(por_ag.get(n, []))
+        por_agente.append({
+            "agente": n,
+            "count": ag_count.get(n, 0),
+            "avg_percent": avg,
+            "nivel_actual": activa["nivel"] if activa else None,
+            "departamento_activo": activa["departamento"] if activa else None,
+            "nivel_recomendado": _recommend_nivel(activa["nivel"] if activa else None, avg),
+            "ultima_fecha": (ag_last.get(n) or {}).get("fecha"),
+            "ultima_nota": (ag_last.get(n) or {}).get("nota"),
+            "ultimo_departamento": (ag_last.get(n) or {}).get("departamento"),
+            "memberships": membs,
+        })
+    por_agente.sort(key=lambda x: (x["ultima_fecha"] or ""), reverse=True)
+
     timeseries = [{"date": d, "avg_percent": _avg(v), "count": len(v)} for d, v in sorted(ts.items())]
     por_parametro = sorted(
         ({"id": rid, "name": rule_names.get(rid, rid), "avg_percent": _avg(v), "count": len(v)}
@@ -222,18 +266,6 @@ async def stats(
         {"dificultad": d, "avg_percent": _avg(v), "count": len(v)}
         for d, v in sorted(por_dif.items(), key=lambda kv: _NIVEL_ORDER.index(kv[0]) if kv[0] in _NIVEL_ORDER else 9)
     ]
-    por_agente = sorted(
-        (
-            {
-                "agente": a, "count": ag_count.get(a, len(v)), "avg_percent": _avg(v),
-                "nivel_actual": nivel_by_name.get(a),
-                "nivel_recomendado": _recommend_nivel(nivel_by_name.get(a), _avg(v)),
-            }
-            for a, v in por_ag.items()
-        ),
-        key=lambda x: (x["avg_percent"] if x["avg_percent"] is not None else -1),
-        reverse=True,
-    )
 
     return {
         "total": total,
@@ -244,8 +276,8 @@ async def stats(
         "por_parametro": por_parametro,
         "por_dificultad": por_dificultad,
         "por_agente": por_agente,
-        "agentes": sorted(agentes_set),
-        "departamentos": sorted(deptos_set),
+        "agentes": sorted(memb_by_name.keys() | set(ag_count.keys())),
+        "departamentos": sorted({d.nombre for d in deptos}),
     }
 
 

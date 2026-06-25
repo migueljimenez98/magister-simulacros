@@ -7,8 +7,7 @@ import { useEffect } from "react";
 import { getToken, setToken } from "@/lib/api";
 
 const NAV = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/dashboard/agentes", label: "Agentes" },
+  { href: "/dashboard", label: "Agentes" },
   { href: "/dashboard/simulacros", label: "Configuración" },
   { href: "/dashboard/dev", label: "Dev" },
   { href: "/dashboard/log", label: "Logs" },

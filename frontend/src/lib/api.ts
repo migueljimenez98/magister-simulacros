@@ -189,12 +189,29 @@ export interface Stats {
   timeseries: { date: string; avg_percent: number | null; count: number }[];
   por_parametro: { id: string; name: string; avg_percent: number | null; count: number }[];
   por_dificultad: { dificultad: string; avg_percent: number | null; count: number }[];
-  por_agente: {
-    agente: string; count: number; avg_percent: number | null;
-    nivel_actual: string | null; nivel_recomendado: string | null;
-  }[];
+  por_agente: AgenteRow[];
   agentes: string[];
   departamentos: string[];
+}
+
+export interface AgenteMembership {
+  id: string;
+  departamento: string;
+  department_id: string | null;
+  nivel: string | null;
+  activo: boolean;
+}
+export interface AgenteRow {
+  agente: string;
+  count: number;
+  avg_percent: number | null;
+  nivel_actual: string | null;
+  departamento_activo: string | null;
+  nivel_recomendado: string | null;
+  ultima_fecha: string | null;
+  ultima_nota: number | null;
+  ultimo_departamento: string | null;
+  memberships: AgenteMembership[];
 }
 
 // ── Simulacros ────────────────────────────────────────────────────────────────
