@@ -7,6 +7,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { api, type ParamScore } from "@/lib/api";
+import { nota10, notaHsl } from "@/lib/score";
 
 const STATUS_LABEL: Record<string, string> = {
   pending: "En cola", fetching: "Procesando…", scoring: "Puntuando…",
@@ -75,7 +76,8 @@ function Inner() {
         </div>
         <div className="flex items-center gap-2 text-sm">
           <span className="font-semibold">
-            {a.percent_quality != null ? `${Number(a.percent_quality).toFixed(0)}%` : "—"}
+            <span style={{ color: notaHsl(a.percent_quality) }}>{nota10(a.percent_quality)}</span>
+            <span className="text-muted font-normal text-xs">/10</span>
             {ideal > 0 && <span className="text-muted font-normal"> · {total}/{ideal}</span>}
           </span>
           <button onClick={() => redispatch.mutate()} disabled={redispatch.isPending}

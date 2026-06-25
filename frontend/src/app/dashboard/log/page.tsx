@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
+import { nota10, notaHsl } from "@/lib/score";
 
 const STATUS_LABEL: Record<string, string> = {
   pending: "En cola", fetching: "Procesando…", scoring: "Puntuando…",
@@ -14,10 +15,6 @@ const STATUS_COLOR: Record<string, string> = {
   failed: "bg-rose-900/40 text-rose-300 border-rose-700",
   pending: "bg-zinc-800 text-zinc-300 border-zinc-700",
 };
-
-function pct(v: number | null) {
-  return v == null ? "—" : `${Number(v).toFixed(0)}%`;
-}
 
 export default function LogLlamadasPage() {
   const { data, isLoading } = useQuery({
@@ -68,7 +65,7 @@ export default function LogLlamadasPage() {
                   </td>
                   <td className="px-4 py-2 text-muted whitespace-nowrap">{r.departamento || "—"}</td>
                   <td className="px-4 py-2 text-muted truncate max-w-[240px]">{r.escenario || "—"}</td>
-                  <td className="px-4 py-2 font-semibold tabular-nums">{pct(r.percent_quality)}</td>
+                  <td className="px-4 py-2 font-semibold tabular-nums" style={{ color: notaHsl(r.percent_quality) }}>{nota10(r.percent_quality)}</td>
                   <td className="px-4 py-2 text-muted truncate max-w-[420px]">
                     {r.feedback_message || (r.status === "done" ? "(sin observaciones)" : "—")}
                   </td>

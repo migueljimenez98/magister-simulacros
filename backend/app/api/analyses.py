@@ -231,8 +231,9 @@ async def stats(
     # Which agents to show: filtered by the selected department (active there) +
     # any agent with calls in the filtered set; all of them when no filter.
     if departamento:
+        # agentes que PERTENECEN a ese departamento (activos o no) + con llamadas allí
         names = {n for n, ms in memb_by_name.items()
-                 if any(m.activo and dept_name.get(m.department_id) == departamento for m in ms)}
+                 if any(dept_name.get(m.department_id) == departamento for m in ms)}
         names |= set(ag_count.keys())
     else:
         names = set(memb_by_name.keys()) | set(ag_count.keys())

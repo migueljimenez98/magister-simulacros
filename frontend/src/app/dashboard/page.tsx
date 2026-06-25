@@ -8,6 +8,7 @@ import {
   api, simulacrosApi,
   type AgenteRow, type Departamento,
 } from "@/lib/api";
+import { nota10, notaHsl } from "@/lib/score";
 
 const NIVELES = ["facil", "medio", "dificil"] as const;
 const DIFF_COLOR: Record<string, string> = {
@@ -15,13 +16,13 @@ const DIFF_COLOR: Record<string, string> = {
   medio: "text-amber-300 border-amber-700 bg-amber-900/30",
   dificil: "text-rose-300 border-rose-700 bg-rose-900/30",
 };
-const scoreColor = (v: number | null | undefined) =>
-  v == null ? "text-muted" : v >= 80 ? "text-emerald-300" : v >= 50 ? "text-amber-300" : "text-rose-300";
-const barColor = (v: number | null | undefined) =>
-  v == null ? "bg-zinc-600" : v >= 80 ? "bg-emerald-500" : v >= 50 ? "bg-amber-500" : "bg-rose-500";
-const pct = (v: number | null | undefined) => (v == null ? "—" : `${Math.round(v)}%`);
 const fdate = (s: string | null) => (s ? new Date(s).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" }) : "—");
 const nivelIdx = (n: string | null) => (n ? NIVELES.indexOf(n as (typeof NIVELES)[number]) : -1);
+
+// Celda de nota sobre 10 con color gradiente.
+function Nota({ v, className = "" }: { v: number | null | undefined; className?: string }) {
+  return <span className={`tabular-nums font-semibold ${className}`} style={{ color: notaHsl(v) }}>{nota10(v)}</span>;
+}
 
 export default function AgentesDashboard() {
   const qc = useQueryClient();
@@ -52,7 +53,7 @@ export default function AgentesDashboard() {
           </select>
           {data && (
             <div className="flex items-center gap-4 text-sm">
-              <span className="text-muted">Nota media: <strong className={scoreColor(data.avg_percent)}>{pct(data.avg_percent)}</strong></span>
+              <span className="text-muted">Nota media: <strong style={{ color: notaHsl(data.avg_percent) }}>{nota10(data.avg_percent)}</strong> <span className="text-xs">/10</span></span>
               <span className="text-muted">Llamadas: <strong className="text-white">{data.total}</strong></span>
             </div>
           )}
@@ -76,8 +77,7 @@ export default function AgentesDashboard() {
               <thead className="bg-bg/50 text-muted text-left">
                 <tr>
                   <th className="px-4 py-2 font-medium">Agente</th>
-                  <th className="px-4 py-2 font-medium">Departamento activo</th>
-                  <th className="px-4 py-2 font-medium">Nivel</th>
+                  <th className="px-4 py-2 font-medium">Departamentos (nivel)</th>
                   <th className="px-4 py-2 font-medium">Último simulacro</th>
                   <th className="px-4 py-2 font-medium">Nota última</th>
                   <th className="px-4 py-2 font-medium">Nº</th>
@@ -92,12 +92,11 @@ export default function AgentesDashboard() {
                   return (
                     <tr key={a.agente} className="border-t border-border hover:bg-bg/40">
                       <td className="px-4 py-2 font-medium">{a.agente}</td>
-                      <td className="px-4 py-2 text-muted">{a.departamento_activo ?? <span className="text-rose-400">sin activo</span>}</td>
-                      <td className="px-4 py-2"><NivelBadge nivel={a.nivel_actual} /></td>
+                      <td className="px-4 py-2"><DeptChips memberships={a.memberships} /></td>
                       <td className="px-4 py-2 text-muted whitespace-nowrap">{fdate(a.ultima_fecha)}{a.ultimo_departamento ? <span className="text-xs"> · {a.ultimo_departamento}</span> : ""}</td>
-                      <td className={`px-4 py-2 font-semibold tabular-nums ${scoreColor(a.ultima_nota)}`}>{pct(a.ultima_nota)}</td>
+                      <td className="px-4 py-2"><Nota v={a.ultima_nota} /></td>
                       <td className="px-4 py-2 text-muted tabular-nums">{a.count}</td>
-                      <td className={`px-4 py-2 font-semibold tabular-nums ${scoreColor(a.avg_percent)}`}>{pct(a.avg_percent)}</td>
+                      <td className="px-4 py-2"><Nota v={a.avg_percent} /></td>
                       <td className="px-4 py-2">
                         <NivelBadge nivel={a.nivel_recomendado} />
                         {cambia && <span className="ml-1 text-xs text-muted">{nivelIdx(a.nivel_recomendado) > nivelIdx(a.nivel_actual) ? "↑" : "↓"}</span>}
@@ -112,17 +111,25 @@ export default function AgentesDashboard() {
             </table>
           </div>
 
-          {data.por_parametro.length > 0 && (
-            <section className="bg-card border border-border rounded-2xl p-4 space-y-3 max-w-3xl">
-              <div>
-                <h3 className="font-semibold">Temas más fallados</h3>
-                <p className="text-xs text-muted">Parámetros de la rúbrica con peor nota media.</p>
-              </div>
-              <div className="space-y-2">
-                {data.por_parametro.slice(0, 8).map((p) => <BarRow key={p.id} label={p.name} value={p.avg_percent} count={p.count} />)}
-              </div>
-            </section>
-          )}
+          <div className="grid gap-5 lg:grid-cols-3">
+            <StatCard title="Temas más fallados" subtitle="Parámetros con peor nota media">
+              {data.por_parametro.length === 0 ? <p className="text-sm text-muted">Sin datos.</p> : (
+                <div className="space-y-2">
+                  {data.por_parametro.slice(0, 8).map((p) => <BarRow key={p.id} label={p.name} value={p.avg_percent} count={p.count} />)}
+                </div>
+              )}
+            </StatCard>
+            <StatCard title="Nota por dificultad">
+              {data.por_dificultad.length === 0 ? <p className="text-sm text-muted">Sin datos.</p> : (
+                <div className="space-y-2">
+                  {data.por_dificultad.map((d) => <BarRow key={d.dificultad} label={d.dificultad} value={d.avg_percent} count={d.count} />)}
+                </div>
+              )}
+            </StatCard>
+            <StatCard title="Progreso" subtitle="Nota media por día">
+              <LineChart points={data.timeseries.map((t) => ({ x: t.date, y: t.avg_percent }))} />
+            </StatCard>
+          </div>
         </>
       )}
 
@@ -151,16 +158,74 @@ function NivelBadge({ nivel }: { nivel: string | null }) {
   return <span className={`text-xs px-2 py-0.5 rounded-full border ${DIFF_COLOR[nivel] ?? "border-border text-muted"}`}>{nivel}</span>;
 }
 
+function DeptChips({ memberships }: { memberships: AgenteRow["memberships"] }) {
+  if (!memberships.length) return <span className="text-rose-400 text-xs">sin departamento</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {memberships.map((m) => (
+        <span
+          key={m.id}
+          title={m.activo ? "Departamento activo" : "Inactivo"}
+          className={`text-xs px-2 py-0.5 rounded-full border whitespace-nowrap ${m.activo ? "border-accent text-white bg-accent/10 font-medium" : "border-border text-muted"}`}
+        >
+          {m.activo ? "★ " : ""}{m.departamento} · {m.nivel ?? "—"}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function BarRow({ label, value, count }: { label: string; value: number | null; count: number }) {
   const w = value == null ? 0 : Math.max(2, Math.min(100, value));
   return (
     <div className="flex items-center gap-3">
-      <span className="text-sm w-48 shrink-0 truncate" title={label}>{label}</span>
+      <span className="text-sm w-40 shrink-0 truncate" title={label}>{label}</span>
       <div className="flex-1 h-3 rounded-full bg-bg overflow-hidden">
-        <div className={`h-full ${barColor(value)}`} style={{ width: `${w}%` }} />
+        <div className="h-full" style={{ width: `${w}%`, backgroundColor: notaHsl(value) }} />
       </div>
-      <span className={`text-sm tabular-nums w-12 text-right ${scoreColor(value)}`}>{pct(value)}</span>
-      <span className="text-xs text-muted w-10 text-right">n={count}</span>
+      <span className="text-sm tabular-nums w-9 text-right" style={{ color: notaHsl(value) }}>{nota10(value)}</span>
+      <span className="text-xs text-muted w-9 text-right">n={count}</span>
+    </div>
+  );
+}
+
+function StatCard({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+  return (
+    <section className="bg-card border border-border rounded-2xl p-4 space-y-3">
+      <div>
+        <h3 className="font-semibold">{title}</h3>
+        {subtitle && <p className="text-xs text-muted">{subtitle}</p>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+// Línea SVG (0-10) con la nota media por día.
+function LineChart({ points }: { points: { x: string; y: number | null }[] }) {
+  const pts = points.filter((p) => p.y != null) as { x: string; y: number }[];
+  if (pts.length === 0) return <p className="text-sm text-muted">Sin datos.</p>;
+  const W = 380, H = 150, padL = 24, padB = 18, padT = 8, padR = 8;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const n = pts.length;
+  const x = (i: number) => padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+  const y = (v: number) => padT + innerH - (Math.max(0, Math.min(100, v)) / 100) * innerH;
+  const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.y).toFixed(1)}`).join(" ");
+  return (
+    <div className="w-full overflow-x-auto">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: 280 }}>
+        {[0, 50, 100].map((g) => (
+          <g key={g}>
+            <line x1={padL} x2={W - padR} y1={y(g)} y2={y(g)} stroke="currentColor" className="text-border" strokeWidth={1} />
+            <text x={2} y={y(g) + 3} className="fill-current text-muted" fontSize={9}>{g / 10}</text>
+          </g>
+        ))}
+        <path d={path} fill="none" stroke="currentColor" className="text-accent" strokeWidth={2} />
+        {pts.map((p, i) => <circle key={i} cx={x(i)} cy={y(p.y)} r={3} style={{ fill: notaHsl(p.y) }} />)}
+        {pts.map((p, i) => (i === 0 || i === n - 1 || n <= 6) && (
+          <text key={`t${i}`} x={x(i)} y={H - 5} textAnchor="middle" className="fill-current text-muted" fontSize={8}>{p.x.slice(5)}</text>
+        ))}
+      </svg>
     </div>
   );
 }
@@ -208,7 +273,7 @@ function AgenteDetailModal({
             Nivel recomendado:{" "}
             {agente.nivel_recomendado
               ? <span className={agente.nivel_recomendado !== agente.nivel_actual ? "text-amber-300" : ""}>{agente.nivel_recomendado}</span>
-              : "—"} (según su nota media {pct(agente.avg_percent)}).
+              : "—"} (según su nota media {nota10(agente.avg_percent)}/10).
           </p>
           {adding && (
             <AddDeptModal
@@ -240,7 +305,7 @@ function AgenteDetailModal({
                   <tr key={r.id} className="border-t border-border">
                     <td className="px-3 py-1.5 text-muted whitespace-nowrap">{fdate(r.created_at)}</td>
                     <td className="px-3 py-1.5 text-muted truncate max-w-[160px]">{r.escenario || "—"}</td>
-                    <td className={`px-3 py-1.5 font-semibold tabular-nums ${scoreColor(r.percent_quality)}`}>{pct(r.percent_quality)}</td>
+                    <td className="px-3 py-1.5"><Nota v={r.percent_quality} /></td>
                     <td className="px-3 py-1.5 text-right">
                       <Link href={`/dashboard/detail?id=${r.id}`} className="text-accent hover:underline">Ver</Link>
                     </td>
