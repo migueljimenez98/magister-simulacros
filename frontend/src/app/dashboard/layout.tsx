@@ -8,10 +8,10 @@ import { getToken, setToken } from "@/lib/api";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/dashboard/log", label: "Log de llamadas" },
   { href: "/dashboard/agentes", label: "Agentes" },
-  { href: "/dashboard/simulacros", label: "Personalidades y config" },
+  { href: "/dashboard/simulacros", label: "Configuración" },
   { href: "/dashboard/dev", label: "Dev" },
+  { href: "/dashboard/log", label: "Logs" },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -29,9 +29,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <div className="min-h-screen flex flex-col">
       <header className="border-b border-border bg-card">
         <div className="w-full px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <h1 className="font-semibold">Magister Simulacros</h1>
-            <nav className="flex gap-4 text-sm">
+          <div className="flex items-center gap-10">
+            <h1 className="font-semibold whitespace-nowrap">Magister Simulacros</h1>
+            <nav className="flex gap-8 text-sm">
               {NAV.map((n) => (
                 <Link
                   key={n.href}
