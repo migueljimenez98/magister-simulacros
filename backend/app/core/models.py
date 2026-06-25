@@ -171,9 +171,13 @@ class SimulacroDepartamento(Base):
         JSONB, nullable=False, default=lambda: ["facil", "medio", "dificil"],
         server_default=text("'[\"facil\",\"medio\",\"dificil\"]'::jsonb"),
     )
-    # Bloque común de FAQs por nivel: {"facil": "...", "medio": "...", ...}.
-    # Se inyecta en la llamada según el nivel del comercial, además de las FAQs
-    # propias del guion.
+    # FAQs comunes estructuradas: lista de {pregunta, respuesta_esperada, nivel}
+    # (nivel ∈ facil|medio|dificil). Se inyectan en la llamada filtradas por el
+    # nivel de la persona/comercial, además de las FAQs propias de la persona.
+    faqs: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    # DEPRECATED (pre-Fase 1): bloque de texto por nivel. Sustituido por `faqs`.
     faqs_por_nivel: Mapped[dict[str, str]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )

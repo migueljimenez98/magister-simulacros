@@ -11,9 +11,13 @@ import {
   type Departamento,
   type DepartamentoInput,
   type Evaluadores,
+  type FaqItem,
   type Scenario,
   type ScenarioInput,
 } from "@/lib/api";
+
+// Niveles de dificultad fijos en todo el sistema.
+const NIVELES = ["facil", "medio", "dificil"] as const;
 
 const DIFF_COLOR: Record<string, string> = {
   facil: "bg-emerald-900/40 text-emerald-300 border-emerald-700",
@@ -32,16 +36,6 @@ const EMPTY_SCENARIO: ScenarioInput = {
   retell_agent_id: "",
   activo: true,
   department_id: null,
-};
-
-const EMPTY_DEPT: DepartamentoInput = {
-  nombre: "",
-  niveles: ["facil", "medio", "dificil"],
-  faqs_por_nivel: {},
-  reglas: [],
-  auto_evaluar: true,
-  project_id: null,
-  activo: true,
 };
 
 type ScenarioModalState = { scenario: Scenario | null; departmentId: string | null };
@@ -75,7 +69,6 @@ export default function SimulacrosPage() {
 
   const deptList = departamentos ?? [];
   const knownDeptIds = new Set(deptList.map((d) => d.id));
-  // Guiones que no cuelgan de ningún departamento existente (no se ocultan).
   const huerfanos = (scenarios ?? []).filter(
     (s) => !s.department_id || !knownDeptIds.has(s.department_id),
   );
@@ -86,8 +79,8 @@ export default function SimulacrosPage() {
         <div>
           <h2 className="text-xl font-semibold">Simulacros</h2>
           <p className="text-sm text-muted">
-            Cada <strong>departamento</strong> agrupa sus guiones (por dificultad), sus comerciales
-            (cada uno con su nivel) y un bloque común de FAQs por nivel.
+            Cada <strong>departamento</strong> agrupa sus <strong>personalidades</strong> (personas IA
+            por dificultad), sus comerciales (con su nivel) y sus FAQs comunes por nivel.
           </p>
         </div>
         <button
@@ -125,16 +118,15 @@ export default function SimulacrosPage() {
         </div>
       )}
 
-      {/* Guiones sin departamento — para no perderlos ni ocultarlos */}
       {huerfanos.length > 0 && (
         <section className="space-y-3">
-          <h3 className="text-lg font-semibold text-amber-300">Guiones sin departamento</h3>
+          <h3 className="text-lg font-semibold text-amber-300">Personalidades sin departamento</h3>
           <p className="text-sm text-muted">
-            Estos guiones no están asignados a ningún departamento. Edítalos para asignarlos.
+            Estas personalidades no están asignadas a ningún departamento. Edítalas para asignarlas.
           </p>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {huerfanos.map((s) => (
-              <ScenarioCard
+              <PersonalidadCard
                 key={s.id}
                 scenario={s}
                 onEdit={() => setScenarioModal({ scenario: s, departmentId: s.department_id ?? null })}
@@ -146,11 +138,10 @@ export default function SimulacrosPage() {
         </section>
       )}
 
-      {/* Evaluadores (cómo se puntúa) — global */}
       <EvaluadoresPanel />
 
       {scenarioModal && (
-        <ScenarioModal
+        <PersonalidadModal
           scenario={scenarioModal.scenario}
           departmentId={scenarioModal.departmentId}
           departamentos={deptList}
@@ -199,27 +190,23 @@ function DepartmentSection({
   onEditComercial: (c: Comercial) => void;
   onChanged: () => void;
 }) {
-  const niveles = dept.niveles?.length ? dept.niveles : ["facil", "medio", "dificil"];
+  const faqsPorNivel = (n: string) => (dept.faqs ?? []).filter((f) => f.nivel === n).length;
 
   return (
     <section className="bg-card border border-border rounded-2xl p-5 space-y-5">
-      {/* Cabecera del departamento */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="space-y-1">
           <h3 className="text-lg font-semibold">{dept.nombre}</h3>
           <div className="flex flex-wrap items-center gap-1.5">
-            {niveles.map((n) => (
+            {NIVELES.map((n) => (
               <span
                 key={n}
-                className={`text-xs px-2 py-0.5 rounded-full border ${DIFF_COLOR[n] ?? "border-border text-muted"}`}
+                className={`text-xs px-2 py-0.5 rounded-full border ${DIFF_COLOR[n]}`}
               >
                 {n}
-                {dept.faqs_por_nivel?.[n]?.trim() ? " · FAQs ✓" : ""}
+                {faqsPorNivel(n) > 0 ? ` · ${faqsPorNivel(n)} FAQ` : ""}
               </span>
             ))}
-            {!dept.auto_evaluar && (
-              <span className="text-xs text-muted">· escalado manual</span>
-            )}
           </div>
         </div>
         <button
@@ -230,20 +217,20 @@ function DepartmentSection({
         </button>
       </div>
 
-      {/* Guiones del departamento */}
+      {/* Personalidades */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h4 className="font-medium">Guiones ({scenarios.length})</h4>
+          <h4 className="font-medium">Personalidades ({scenarios.length})</h4>
           <button onClick={onNewScenario} className="text-sm text-accent hover:underline">
-            + Nuevo guion
+            + Nueva personalidad
           </button>
         </div>
         {!scenarios.length ? (
-          <p className="text-sm text-muted">Sin guiones todavía en este departamento.</p>
+          <p className="text-sm text-muted">Sin personalidades todavía en este departamento.</p>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {scenarios.map((s) => (
-              <ScenarioCard
+              <PersonalidadCard
                 key={s.id}
                 scenario={s}
                 onEdit={() => onEditScenario(s)}
@@ -255,7 +242,7 @@ function DepartmentSection({
         )}
       </div>
 
-      {/* Comerciales del departamento */}
+      {/* Comerciales */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h4 className="font-medium">Comerciales ({comerciales.length})</h4>
@@ -273,7 +260,7 @@ function DepartmentSection({
               <tr>
                 <th className="px-4 py-2 font-medium">Nombre</th>
                 <th className="px-4 py-2 font-medium">Nivel</th>
-                <th className="px-4 py-2 font-medium">Guion por defecto</th>
+                <th className="px-4 py-2 font-medium">Personalidad por defecto</th>
                 <th className="px-4 py-2 font-medium">Activo</th>
                 <th className="px-4 py-2"></th>
               </tr>
@@ -310,9 +297,9 @@ function DepartmentSection({
   );
 }
 
-// ─── Scenario card ────────────────────────────────────────────────────────────
+// ─── Personalidad card ───────────────────────────────────────────────────────
 
-function ScenarioCard({
+function PersonalidadCard({
   scenario: s, onEdit, onTest, onChanged,
 }: {
   scenario: Scenario;
@@ -344,15 +331,15 @@ function ScenarioCard({
       {open && (
         <div className="space-y-2 text-sm border-t border-border pt-3">
           <Field label="Objeciones" value={s.objeciones} />
-          <Field label="FAQs" value={s.faqs} />
-          <Field label="Guion" value={s.guion} />
+          <Field label="FAQs propias" value={s.faqs} />
+          <Field label="Situación (guion)" value={s.guion} />
           {s.retell_agent_id && <Field label="Agente Retell" value={s.retell_agent_id} />}
         </div>
       )}
 
       <div className="flex flex-wrap items-center gap-2 pt-1 text-sm">
         <button onClick={() => setOpen((v) => !v)} className="text-accent hover:underline">
-          {open ? "Ocultar" : "Ver guion"}
+          {open ? "Ocultar" : "Ver detalle"}
         </button>
         <span className="text-border">·</span>
         <button onClick={onEdit} className="text-muted hover:text-white">Editar</button>
@@ -364,7 +351,7 @@ function ScenarioCard({
         </button>
         <span className="text-border">·</span>
         <button
-          onClick={() => { if (confirm(`¿Borrar el guion “${s.nombre}”?`)) remove.mutate(); }}
+          onClick={() => { if (confirm(`¿Borrar la personalidad “${s.nombre}”?`)) remove.mutate(); }}
           className="text-rose-400 hover:text-rose-300"
         >
           Borrar
@@ -384,14 +371,14 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-// ─── Scenario create/edit modal ────────────────────────────────────────────────
+// ─── Personalidad create/edit modal ──────────────────────────────────────────
 
 function stripId(s: Scenario): ScenarioInput {
   const { id: _id, ...rest } = s;
   return rest;
 }
 
-function ScenarioModal({
+function PersonalidadModal({
   scenario, departmentId, departamentos, onClose, onSaved,
 }: {
   scenario: Scenario | null;
@@ -405,8 +392,6 @@ function ScenarioModal({
       ? stripId(scenario)
       : { ...EMPTY_SCENARIO, department_id: departmentId },
   );
-  const dept = departamentos.find((d) => d.id === form.department_id);
-  const niveles = dept?.niveles?.length ? dept.niveles : ["facil", "medio", "dificil"];
   const save = useMutation({
     mutationFn: () =>
       scenario
@@ -417,24 +402,15 @@ function ScenarioModal({
   const set = (k: keyof ScenarioInput, v: string | boolean | null) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
-    <Modal title={scenario ? "Editar guion" : "Nuevo guion"} onClose={onClose}>
+    <Modal title={scenario ? "Editar personalidad" : "Nueva personalidad"} onClose={onClose}>
       <div className="space-y-3">
-        <Input label="Nombre" value={form.nombre} onChange={(v) => set("nombre", v)} />
+        <Input label="Nombre de la persona IA" value={form.nombre} onChange={(v) => set("nombre", v)} />
         <div className="grid grid-cols-2 gap-3">
           <label className="text-sm space-y-1 block">
             <span className="text-muted">Departamento</span>
             <select
               value={form.department_id ?? ""}
-              onChange={(e) => {
-                const id = e.target.value || null;
-                const d = departamentos.find((x) => x.id === id);
-                setForm((f) => ({
-                  ...f,
-                  department_id: id,
-                  // Si la dificultad actual no existe en el nuevo dpto, ajusta.
-                  dificultad: d && !d.niveles.includes(f.dificultad) ? (d.niveles[0] ?? f.dificultad) : f.dificultad,
-                }));
-              }}
+              onChange={(e) => set("department_id", e.target.value || null)}
               className="w-full bg-bg border border-border rounded-lg px-3 py-2"
             >
               <option value="">— sin departamento —</option>
@@ -448,22 +424,22 @@ function ScenarioModal({
               onChange={(e) => set("dificultad", e.target.value)}
               className="w-full bg-bg border border-border rounded-lg px-3 py-2"
             >
-              {niveles.map((d) => <option key={d} value={d}>{d}</option>)}
+              {NIVELES.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </label>
         </div>
         <Input label="Producto" value={form.producto ?? ""} onChange={(v) => set("producto", v)} />
-        <TextArea label="Persona (perfil del alumno)" value={form.persona} onChange={(v) => set("persona", v)} />
+        <TextArea label="Persona (perfil del alumno IA)" value={form.persona} onChange={(v) => set("persona", v)} />
         <TextArea label="Objeciones" value={form.objeciones} onChange={(v) => set("objeciones", v)} />
-        <TextArea label="FAQs propias del guion" value={form.faqs} onChange={(v) => set("faqs", v)} />
+        <TextArea label="FAQs propias de la personalidad" value={form.faqs} onChange={(v) => set("faqs", v)} />
         <p className="text-xs text-muted -mt-1">
           Se suman a las FAQs comunes del nivel del departamento.
         </p>
-        <TextArea label="Guion (situación)" value={form.guion} onChange={(v) => set("guion", v)} rows={4} />
+        <TextArea label="Situación (guion)" value={form.guion} onChange={(v) => set("guion", v)} rows={4} />
         <Input label="Agente Retell (opcional, para voz distinta)" value={form.retell_agent_id ?? ""} onChange={(v) => set("retell_agent_id", v)} />
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={form.activo} onChange={(e) => set("activo", e.target.checked)} />
-          Activo
+          Activa
         </label>
         {save.isError && <p className="text-sm text-rose-400">No se pudo guardar.</p>}
       </div>
@@ -472,7 +448,7 @@ function ScenarioModal({
   );
 }
 
-// ─── Comercial modal ────────────────────────────────────────────────────────────
+// ─── Comercial modal ─────────────────────────────────────────────────────────
 
 function ComercialModal({
   comercial, departmentId, scenarios, departamentos, onClose, onSaved,
@@ -485,23 +461,19 @@ function ComercialModal({
   onSaved: () => void;
 }) {
   const initialDept = comercial?.department_id ?? departmentId ?? (departamentos[0]?.id ?? null);
-  const initialNiveles = departamentos.find((d) => d.id === initialDept)?.niveles ?? ["facil", "medio", "dificil"];
   const [form, setForm] = useState<ComercialInput>(
     comercial
       ? {
           extension: comercial.extension, nombre: comercial.nombre, activo: comercial.activo,
           default_scenario_id: comercial.default_scenario_id,
           department_id: comercial.department_id ?? initialDept,
-          nivel: comercial.nivel ?? (initialNiveles[0] ?? null),
+          nivel: comercial.nivel ?? NIVELES[0],
         }
       : {
           extension: "", nombre: "", activo: true, default_scenario_id: null,
-          department_id: initialDept, nivel: initialNiveles[0] ?? null,
+          department_id: initialDept, nivel: NIVELES[0],
         },
   );
-  const dept = departamentos.find((d) => d.id === form.department_id);
-  const niveles = dept?.niveles?.length ? dept.niveles : ["facil", "medio", "dificil"];
-  // Guiones por defecto: solo los del departamento del comercial.
   const deptScenarios = scenarios.filter((s) => !form.department_id || s.department_id === form.department_id);
   const save = useMutation({
     mutationFn: () =>
@@ -525,16 +497,7 @@ function ComercialModal({
             <span className="text-muted">Departamento</span>
             <select
               value={form.department_id ?? ""}
-              onChange={(e) => {
-                const id = e.target.value || null;
-                const d = departamentos.find((x) => x.id === id);
-                setForm((f) => ({
-                  ...f,
-                  department_id: id,
-                  nivel: d && !d.niveles.includes(f.nivel ?? "") ? (d.niveles[0] ?? null) : f.nivel,
-                  default_scenario_id: null,
-                }));
-              }}
+              onChange={(e) => setForm((f) => ({ ...f, department_id: e.target.value || null, default_scenario_id: null }))}
               className="w-full bg-bg border border-border rounded-lg px-3 py-2"
             >
               <option value="">—</option>
@@ -548,13 +511,12 @@ function ComercialModal({
               onChange={(e) => set("nivel", e.target.value || null)}
               className="w-full bg-bg border border-border rounded-lg px-3 py-2"
             >
-              <option value="">—</option>
-              {niveles.map((n) => <option key={n} value={n}>{n}</option>)}
+              {NIVELES.map((n) => <option key={n} value={n}>{n}</option>)}
             </select>
           </label>
         </div>
         <label className="text-sm space-y-1 block">
-          <span className="text-muted">Guion por defecto (opcional)</span>
+          <span className="text-muted">Personalidad por defecto (opcional)</span>
           <select
             value={form.default_scenario_id ?? ""}
             onChange={(e) => set("default_scenario_id", e.target.value || null)}
@@ -593,7 +555,7 @@ function ComercialModal({
   );
 }
 
-// ─── Department create/edit modal (niveles + FAQs por nivel + escalado) ───────
+// ─── Department modal (nombre + FAQs comunes estructuradas) ───────────────────
 
 function DepartmentModal({
   dept, onClose, onSaved,
@@ -602,31 +564,20 @@ function DepartmentModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const base = dept ?? EMPTY_DEPT;
-  const [nombre, setNombre] = useState(base.nombre);
-  const [nivelesStr, setNivelesStr] = useState((base.niveles ?? []).join(", "));
-  const [faqs, setFaqs] = useState<Record<string, string>>({ ...(base.faqs_por_nivel ?? {}) });
-  const [auto, setAuto] = useState(base.auto_evaluar);
-  const [reglas, setReglas] = useState(JSON.stringify(base.reglas ?? [], null, 2));
+  const [nombre, setNombre] = useState(dept?.nombre ?? "");
+  const [faqs, setFaqs] = useState<FaqItem[]>(dept?.faqs ? [...dept.faqs] : []);
   const [err, setErr] = useState("");
-
-  const niveles = nivelesStr.split(",").map((s) => s.trim()).filter(Boolean);
 
   const save = useMutation({
     mutationFn: () => {
-      let parsedReglas: Array<Record<string, unknown>>;
-      try { parsedReglas = JSON.parse(reglas); } catch { throw new Error("El JSON de reglas no es válido."); }
-      // Conserva solo las FAQs de los niveles vigentes.
-      const faqsClean: Record<string, string> = {};
-      for (const n of niveles) if (faqs[n]?.trim()) faqsClean[n] = faqs[n];
+      const clean = faqs.filter((f) => f.pregunta.trim() || f.respuesta_esperada.trim());
       const body: DepartamentoInput = {
         nombre: nombre.trim(),
-        niveles,
-        faqs_por_nivel: faqsClean,
-        reglas: parsedReglas,
-        auto_evaluar: auto,
-        project_id: base.project_id,
-        activo: base.activo,
+        faqs: clean,
+        reglas: (dept?.reglas as Array<Record<string, unknown>>) ?? [],
+        auto_evaluar: dept?.auto_evaluar ?? true,
+        project_id: dept?.project_id ?? null,
+        activo: dept?.activo ?? true,
       };
       return dept ? simulacrosApi.updateDepartamento(dept.id, body) : simulacrosApi.createDepartamento(body);
     },
@@ -638,76 +589,66 @@ function DepartmentModal({
     onSuccess: onSaved,
   });
 
+  const addFaq = () => setFaqs((f) => [...f, { pregunta: "", respuesta_esperada: "", nivel: "medio" }]);
+  const setFaq = (i: number, k: keyof FaqItem, v: string) =>
+    setFaqs((f) => f.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
+  const delFaq = (i: number) => setFaqs((f) => f.filter((_, j) => j !== i));
+
   return (
     <Modal title={dept ? `Configurar — ${dept.nombre}` : "Nuevo departamento"} onClose={onClose}>
       <div className="space-y-4">
         <Input label="Nombre del departamento" value={nombre} onChange={setNombre} />
-        <Input
-          label="Niveles de dificultad (en orden, separados por coma)"
-          value={nivelesStr}
-          onChange={setNivelesStr}
-        />
 
-        {/* FAQs comunes por nivel */}
         <div className="space-y-2">
-          <span className="text-sm text-muted">Bloque común de FAQs por nivel</span>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted">FAQs comunes (por nivel)</span>
+            <button onClick={addFaq} className="text-sm text-accent hover:underline">+ Añadir FAQ</button>
+          </div>
           <p className="text-xs text-muted -mt-1">
-            Se inyecta en cada llamada según el nivel del comercial, además de las FAQs del guion.
+            Cada FAQ: pregunta + respuesta esperada + nivel. Se inyectan en la llamada según el nivel
+            de la persona IA.
           </p>
-          {!niveles.length ? (
-            <p className="text-xs text-amber-300">Define al menos un nivel arriba.</p>
+          {!faqs.length ? (
+            <p className="text-xs text-muted">Sin FAQs todavía. Añade la primera con “+ Añadir FAQ”.</p>
           ) : (
-            niveles.map((n) => (
-              <label key={n} className="text-sm space-y-1 block">
-                <span className="text-muted flex items-center gap-2">
-                  <span className={`text-xs px-2 py-0.5 rounded-full border ${DIFF_COLOR[n] ?? "border-border text-muted"}`}>{n}</span>
-                  FAQs comunes
-                </span>
-                <textarea
-                  value={faqs[n] ?? ""}
-                  rows={3}
-                  onChange={(e) => setFaqs((f) => ({ ...f, [n]: e.target.value }))}
-                  className="w-full bg-bg border border-border rounded-lg px-3 py-2 resize-y"
-                />
-              </label>
-            ))
+            <div className="space-y-3">
+              {faqs.map((f, i) => (
+                <div key={i} className="rounded-xl border border-border p-3 space-y-2 bg-bg/40">
+                  <div className="flex items-center justify-between gap-2">
+                    <select
+                      value={f.nivel}
+                      onChange={(e) => setFaq(i, "nivel", e.target.value)}
+                      className={`text-xs px-2 py-1 rounded-lg border bg-bg ${DIFF_COLOR[f.nivel] ?? "border-border"}`}
+                    >
+                      {NIVELES.map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    <button onClick={() => delFaq(i)} className="text-xs text-rose-400 hover:text-rose-300">Quitar</button>
+                  </div>
+                  <input
+                    value={f.pregunta}
+                    onChange={(e) => setFaq(i, "pregunta", e.target.value)}
+                    placeholder="Pregunta"
+                    className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm"
+                  />
+                  <textarea
+                    value={f.respuesta_esperada}
+                    onChange={(e) => setFaq(i, "respuesta_esperada", e.target.value)}
+                    placeholder="Respuesta esperada"
+                    rows={2}
+                    className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm resize-y"
+                  />
+                </div>
+              ))}
+            </div>
           )}
         </div>
-
-        {/* Escalado */}
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
-          Escalado automático de nivel tras cada llamada
-        </label>
-        <label className="text-sm space-y-1 block">
-          <span className="text-muted">Reglas de escalado (JSON)</span>
-          <textarea
-            value={reglas}
-            onChange={(e) => setReglas(e.target.value)}
-            rows={8}
-            className="w-full bg-bg border border-border rounded-lg px-3 py-2 font-mono text-xs resize-y"
-          />
-        </label>
-        <details className="text-xs text-muted">
-          <summary className="cursor-pointer">Campos de una regla</summary>
-          <pre className="mt-2 whitespace-pre-wrap">{`{
-  "id": "asc_facil_medio",
-  "from_nivel": "facil",
-  "to_nivel": "medio",
-  "direction": "promote",        // promote | demote
-  "scenario_dificultad": "facil",// o null = todos
-  "metric": "count_above",       // count_above | avg_last_n | consecutive_above
-  "n": 3,
-  "min_score": 80
-}`}</pre>
-        </details>
         {err && <p className="text-sm text-rose-400">{err}</p>}
       </div>
 
       <div className="flex items-center justify-between pt-4">
         {dept ? (
           <button
-            onClick={() => { if (confirm(`¿Borrar el departamento “${dept.nombre}”? Sus guiones y comerciales quedarán sin departamento.`)) remove.mutate(); }}
+            onClick={() => { if (confirm(`¿Borrar el departamento “${dept.nombre}”? Sus personalidades y comerciales quedarán sin departamento.`)) remove.mutate(); }}
             className="text-sm text-rose-400 hover:text-rose-300"
           >
             Borrar departamento
@@ -717,7 +658,7 @@ function DepartmentModal({
           <button onClick={onClose} className="text-sm rounded-lg border border-border px-3 py-2 hover:border-accent">Cancelar</button>
           <button
             onClick={() => save.mutate()}
-            disabled={save.isPending || !nombre.trim() || !niveles.length}
+            disabled={save.isPending || !nombre.trim()}
             className="text-sm rounded-lg bg-accent text-black font-medium px-3 py-2 hover:opacity-90 disabled:opacity-50"
           >
             {save.isPending ? "Guardando…" : "Guardar"}
@@ -728,7 +669,7 @@ function DepartmentModal({
   );
 }
 
-// ─── Test (test-ingest) modal ──────────────────────────────────────────────────
+// ─── Test (test-ingest) modal ────────────────────────────────────────────────
 
 function TestModal({ scenario, onClose }: { scenario: Scenario; onClose: () => void }) {
   const [transcript, setTranscript] = useState("");
@@ -739,9 +680,9 @@ function TestModal({ scenario, onClose }: { scenario: Scenario; onClose: () => v
   });
 
   return (
-    <Modal title={`Probar guion — ${scenario.nombre}`} onClose={onClose}>
+    <Modal title={`Probar personalidad — ${scenario.nombre}`} onClose={onClose}>
       <p className="text-sm text-muted mb-3">
-        Pega una transcripción de ejemplo (sin teléfono). Se evaluará con la rúbrica y aparecerá en Análisis.
+        Pega una transcripción de ejemplo (sin teléfono). Se evaluará con la rúbrica y aparecerá en Resultados.
       </p>
       <div className="space-y-3">
         <Input label="Nombre de la asesora" value={agente} onChange={setAgente} />
@@ -850,7 +791,7 @@ function EvaluadoresForm({ initial }: { initial: Evaluadores }) {
   );
 }
 
-// ─── Generic modal primitives ───────────────────────────────────────────────────
+// ─── Generic modal primitives ────────────────────────────────────────────────
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (

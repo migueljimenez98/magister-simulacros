@@ -181,17 +181,29 @@ export interface Comercial {
 }
 export type ComercialInput = Omit<Comercial, "id">;
 
+export interface FaqItem {
+  pregunta: string;
+  respuesta_esperada: string;
+  nivel: string;
+}
 export interface Departamento {
   id: string;
   nombre: string;
-  niveles: string[];
-  faqs_por_nivel: Record<string, string>;
+  niveles: string[];          // fijos: facil/medio/dificil
+  faqs: FaqItem[];            // FAQs comunes estructuradas, por nivel
   reglas: Array<Record<string, unknown>>;
   auto_evaluar: boolean;
   project_id: string | null;
   activo: boolean;
 }
-export type DepartamentoInput = Omit<Departamento, "id">;
+export interface DepartamentoInput {
+  nombre: string;
+  faqs: FaqItem[];
+  reglas?: Array<Record<string, unknown>>;
+  auto_evaluar?: boolean;
+  project_id?: string | null;
+  activo?: boolean;
+}
 
 export interface Evaluadores {
   project_id: string;

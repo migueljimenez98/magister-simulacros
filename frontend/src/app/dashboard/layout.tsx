@@ -21,7 +21,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <h1 className="font-semibold">Magister Simulacros</h1>
             <nav className="flex gap-4 text-sm">
               <Link href="/dashboard" className="text-muted hover:text-white">Resultados</Link>
-              <Link href="/dashboard/simulacros" className="text-muted hover:text-white">Guiones y config</Link>
+              <Link href="/dashboard/simulacros" className="text-muted hover:text-white">Personalidades y config</Link>
               <Link href="/dashboard/dev" className="text-muted hover:text-white">Dev</Link>
             </nav>
           </div>

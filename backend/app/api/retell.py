@@ -53,6 +53,9 @@ simulacros_router = APIRouter(
 # Public (no login): the self-service "Iniciar simulacro" panel + its turn queue.
 cola_router = APIRouter(prefix="/simulacros/cola", tags=["simulacros-cola"])
 
+# Niveles de dificultad fijos en todo el sistema.
+NIVELES = ["facil", "medio", "dificil"]
+
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -197,6 +200,21 @@ async def _pick_scenario(
     return random.choice(rows)
 
 
+def _faqs_to_text(faqs: list[dict[str, Any]], nivel: str | None) -> str:
+    """Render the department's structured FAQs (filtered by nivel) as a text
+    block the agent prompt can consume: 'P: … / R esperada: …' per FAQ."""
+    out: list[str] = []
+    for f in faqs or []:
+        if nivel and (f.get("nivel") or "") != nivel:
+            continue
+        preg = str(f.get("pregunta") or "").strip()
+        resp = str(f.get("respuesta_esperada") or "").strip()
+        if not preg and not resp:
+            continue
+        out.append(f"P: {preg}\nR esperada: {resp}".strip())
+    return "\n\n".join(out)
+
+
 async def _common_faqs_for(
     session: SessionDep,
     comercial: SimulacroComercial | None,
@@ -204,8 +222,8 @@ async def _common_faqs_for(
 ) -> str:
     """Department-level common FAQ block for the relevant difficulty level.
 
-    Looks up the department (from the comercial, else the scenario) and returns
-    its `faqs_por_nivel[nivel]`, where `nivel` is the comercial's level (falling
+    Looks up the department (from the comercial, else the scenario) and renders
+    its structured `faqs` filtered by `nivel` (the comercial's level, falling
     back to the scenario's difficulty). Empty string if none applies."""
     dept_id = (comercial.department_id if comercial else None) or (
         scenario.department_id if scenario else None
@@ -213,14 +231,12 @@ async def _common_faqs_for(
     if not dept_id:
         return ""
     dept = await session.get(SimulacroDepartamento, dept_id)
-    if not dept or not dept.faqs_por_nivel:
+    if not dept or not dept.faqs:
         return ""
     nivel = (comercial.nivel if comercial and comercial.nivel else None) or (
         scenario.dificultad if scenario else None
     )
-    if not nivel:
-        return ""
-    return str(dept.faqs_por_nivel.get(nivel) or "").strip()
+    return _faqs_to_text(dept.faqs, nivel)
 
 
 async def _run_simulacro_audit(
@@ -810,8 +826,8 @@ def _dept_to_dict(d: SimulacroDepartamento) -> dict[str, Any]:
     return {
         "id": d.id,
         "nombre": d.nombre,
-        "niveles": d.niveles or [],
-        "faqs_por_nivel": d.faqs_por_nivel or {},
+        "niveles": NIVELES,                    # fijos: facil/medio/dificil
+        "faqs": d.faqs or [],                  # [{pregunta, respuesta_esperada, nivel}]
         "reglas": d.reglas or [],
         "auto_evaluar": d.auto_evaluar,
         "project_id": d.project_id,
@@ -819,10 +835,16 @@ def _dept_to_dict(d: SimulacroDepartamento) -> dict[str, Any]:
     }
 
 
+class FaqItem(BaseModel):
+    pregunta: str = ""
+    respuesta_esperada: str = ""
+    nivel: str = "medio"
+
+
 class DepartamentoIn(BaseModel):
     nombre: str
-    niveles: list[str] = Field(default_factory=lambda: ["facil", "medio", "dificil"])
-    faqs_por_nivel: dict[str, str] = Field(default_factory=dict)
+    faqs: list[FaqItem] = Field(default_factory=list)
+    # Escalado: se conserva en BD pero ya no se edita desde el alta del dpto.
     reglas: list[dict[str, Any]] = Field(default_factory=list)
     auto_evaluar: bool = True
     project_id: str | None = None

@@ -71,7 +71,7 @@ function Inner() {
           <span className="text-xs px-2 py-1 rounded-full border border-border text-muted">
             {STATUS_LABEL[a.status] ?? a.status}
           </span>
-          {escenario && <span className="text-xs text-muted">· guion: {escenario}</span>}
+          {escenario && <span className="text-xs text-muted">· personalidad: {escenario}</span>}
         </div>
         <div className="flex items-center gap-2 text-sm">
           <span className="font-semibold">

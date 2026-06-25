@@ -62,9 +62,9 @@ function CrmButtonSimulator({ comerciales, scenarios }: { comerciales: Comercial
         <h3 className="text-lg font-semibold">🟢 Simular la petición del CRM</h3>
         <p className="text-sm text-zinc-300">
           Simula lo que hará el CRM: “el agente X solicita un simulacro”. Cogemos su alias,
-          miramos su nivel, <strong>elegimos el guion</strong> y armamos a Retell. Te devolvemos{" "}
+          miramos su nivel, <strong>elegimos el personalidad</strong> y armamos a Retell. Te devolvemos{" "}
           <span className="font-mono text-emerald-300">OK</span> (como al CRM). Luego marca al{" "}
-          <span className="font-mono text-emerald-300">{SIM_NUMBER}</span> y entrará con ese guion.
+          <span className="font-mono text-emerald-300">{SIM_NUMBER}</span> y entrará con ese personalidad.
         </p>
       </div>
 
@@ -87,7 +87,7 @@ function CrmButtonSimulator({ comerciales, scenarios }: { comerciales: Comercial
         <Input label="Nombre de la agente" value={nombre} onChange={(v) => { setNombre(v); setComId(""); }} />
         <Input label="Su nº (caller ID, opcional)" value={fromNumber} onChange={setFromNumber} />
         <label className="text-sm space-y-1 block">
-          <span className="text-muted">Guion</span>
+          <span className="text-muted">Personalidad</span>
           <select
             value={scenarioId}
             onChange={(e) => setScenarioId(e.target.value)}
@@ -117,7 +117,7 @@ function CrmButtonSimulator({ comerciales, scenarios }: { comerciales: Comercial
             </span>
             <span className="text-muted">
               → {announce.data.agente_nombre}
-              {announce.data.nivel ? ` (${announce.data.nivel})` : ""} · guion:{" "}
+              {announce.data.nivel ? ` (${announce.data.nivel})` : ""} · personalidad:{" "}
               <strong className="text-zinc-200">{announce.data.escenario ?? "—"}</strong>
             </span>
           </span>
@@ -151,14 +151,14 @@ function CrmCallTester({ scenarios }: { scenarios: Scenario[] }) {
         </h3>
         <p className="text-sm text-muted">
           Alternativa sin marcar tú: Retell llamará al número que pongas y el simulacro se
-          atribuye al nombre que escribas. El guion se elige al azar (o fija uno).
+          atribuye al nombre que escribas. El personalidad se elige al azar (o fija uno).
         </p>
       </div>
       <div className="grid gap-3 md:grid-cols-3">
         <Input label="Nombre (comercial)" value={nombre} onChange={setNombre} />
         <Input label="Número a llamar (+34…)" value={numero} onChange={setNumero} />
         <label className="text-sm space-y-1 block">
-          <span className="text-muted">Guion</span>
+          <span className="text-muted">Personalidad</span>
           <select
             value={scenarioId}
             onChange={(e) => setScenarioId(e.target.value)}
@@ -190,7 +190,7 @@ function CrmCallTester({ scenarios }: { scenarios: Scenario[] }) {
         )}
         {call.data && (
           <span className="text-sm text-emerald-300">
-            Llamando a {numero} · guion: {call.data.scenario ?? "aleatorio"}. Descuelga y haz
+            Llamando a {numero} · personalidad: {call.data.scenario ?? "aleatorio"}. Descuelga y haz
             de asesora; al colgar verás el análisis en “Análisis”.
           </span>
         )}

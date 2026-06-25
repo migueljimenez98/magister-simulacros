@@ -51,7 +51,7 @@ export default function ResultadosPage() {
               <tr>
                 <th className="px-4 py-2 font-medium">Comercial</th>
                 <th className="px-4 py-2 font-medium">Departamento</th>
-                <th className="px-4 py-2 font-medium">Guion</th>
+                <th className="px-4 py-2 font-medium">Personalidad</th>
                 <th className="px-4 py-2 font-medium">Nota</th>
                 <th className="px-4 py-2 font-medium">Feedback</th>
                 <th className="px-4 py-2 font-medium">Estado</th>
