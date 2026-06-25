@@ -25,7 +25,7 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 
 from ..core.config import settings
@@ -640,6 +640,12 @@ class ScenarioIn(BaseModel):
     activo: bool = True
     department_id: str | None = None
 
+    @field_validator("department_id", "retell_agent_id", mode="before")
+    @classmethod
+    def _empty_to_none(cls, v):
+        # An empty string for an FK column raises a 500 (constraint). Coerce "" → None.
+        return v or None
+
 
 @simulacros_router.get("/scenarios")
 async def list_scenarios(session: SessionDep) -> list[dict[str, Any]]:
@@ -740,6 +746,11 @@ class ComercialIn(BaseModel):
     default_scenario_id: str | None = None
     department_id: str | None = None
     nivel: str | None = None
+
+    @field_validator("default_scenario_id", "department_id", mode="before")
+    @classmethod
+    def _empty_to_none(cls, v):
+        return v or None
 
 
 def _comercial_to_dict(c: SimulacroComercial) -> dict[str, Any]:
@@ -934,6 +945,11 @@ class DepartamentoIn(BaseModel):
     auto_evaluar: bool = True
     project_id: str | None = None
     activo: bool = True
+
+    @field_validator("evaluador_id", "project_id", mode="before")
+    @classmethod
+    def _empty_to_none(cls, v):
+        return v or None
 
 
 @simulacros_router.get("/departamentos")
