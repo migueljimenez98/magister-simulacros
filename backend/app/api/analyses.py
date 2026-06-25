@@ -9,8 +9,23 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 
-from ..core.models import QualityAnalysis
+from ..core.config import settings
+from ..core.models import QualityAnalysis, QualityProject, SimulacroComercial
 from .deps import SessionDep, current_user, get_audit_graph, require_role
+
+_NIVEL_ORDER = ["facil", "medio", "dificil"]
+
+
+def _recommend_nivel(actual: str | None, avg: float | None) -> str | None:
+    """Heuristic: high average → suggest moving up a level, low → down."""
+    if actual not in _NIVEL_ORDER or avg is None:
+        return actual
+    i = _NIVEL_ORDER.index(actual)
+    if avg >= 80 and i < len(_NIVEL_ORDER) - 1:
+        return _NIVEL_ORDER[i + 1]
+    if avg < 50 and i > 0:
+        return _NIVEL_ORDER[i - 1]
+    return actual
 
 log = structlog.get_logger()
 router = APIRouter(prefix="/analyses", tags=["analyses"], dependencies=[Depends(current_user)])
@@ -109,6 +124,129 @@ async def facets(session: SessionDep, project_id: str | None = None) -> dict[str
     agentes = [r for (r,) in (await session.execute(ag)).all() if r]
     estados = [r for (r,) in (await session.execute(st)).all() if r]
     return {"agentes": sorted(agentes), "estados": sorted(estados)}
+
+
+@router.get("/stats")
+async def stats(
+    session: SessionDep,
+    departamento: str | None = None,
+    agente: str | None = None,
+    desde: str | None = None,
+    hasta: str | None = None,
+) -> dict[str, Any]:
+    """Aggregated analytics for the dashboard: KPIs, progress over time,
+    worst-scoring parameters, by-difficulty, and per-agent level + recommendation.
+    Filters by departamento / agente / date range (all optional)."""
+    conds = []
+    if departamento:
+        conds.append(QualityAnalysis.departamento == departamento)
+    if agente:
+        conds.append(QualityAnalysis.agente_nombre == agente)
+    if desde:
+        try:
+            conds.append(QualityAnalysis.created_at >= datetime.fromisoformat(desde))
+        except ValueError:
+            pass
+    if hasta:
+        try:
+            conds.append(QualityAnalysis.created_at <= datetime.fromisoformat(hasta))
+        except ValueError:
+            pass
+
+    stmt = select(
+        QualityAnalysis.agente_nombre, QualityAnalysis.departamento, QualityAnalysis.status,
+        QualityAnalysis.percent_quality, QualityAnalysis.scores, QualityAnalysis.crm_snapshot,
+        QualityAnalysis.created_at,
+    )
+    for c in conds:
+        stmt = stmt.where(c)
+    rows = (await session.execute(stmt.order_by(QualityAnalysis.created_at))).all()
+
+    # Rule id → friendly name (from the project's rubric).
+    project = await session.get(QualityProject, settings.simulacros_project_id)
+    rule_names = {r.get("id"): (r.get("name") or r.get("id")) for r in (project.rules_table or [])} if project else {}
+
+    # Comercial → current level.
+    comerciales = (await session.execute(select(SimulacroComercial))).scalars().all()
+    nivel_by_name = {c.nombre: c.nivel for c in comerciales}
+
+    total = len(rows)
+    by_status: dict[str, int] = {}
+    percents: list[float] = []
+    ts: dict[str, list[float]] = {}              # date -> percents
+    por_param: dict[str, list[float]] = {}       # rule_id -> score% list
+    por_dif: dict[str, list[float]] = {}         # dificultad -> percents
+    por_ag: dict[str, list[float]] = {}          # agente -> percents
+    ag_count: dict[str, int] = {}
+    agentes_set, deptos_set = set(), set()
+
+    for agente_nombre, depto, st, pq, scores, snap, created in rows:
+        by_status[st] = by_status.get(st, 0) + 1
+        if agente_nombre:
+            agentes_set.add(agente_nombre)
+            ag_count[agente_nombre] = ag_count.get(agente_nombre, 0) + 1
+        if depto:
+            deptos_set.add(depto)
+        if st != "done" or pq is None:
+            continue
+        p = float(pq)
+        percents.append(p)
+        day = created.date().isoformat() if created else "—"
+        ts.setdefault(day, []).append(p)
+        if agente_nombre:
+            por_ag.setdefault(agente_nombre, []).append(p)
+        # dificultad desde el snapshot
+        dif = (((snap or {}).get("_simulacro") or {}).get("scenario") or {}).get("dificultad")
+        if dif:
+            por_dif.setdefault(dif, []).append(p)
+        # por parámetro
+        for rid, sc in (scores or {}).items():
+            if not isinstance(sc, dict) or not sc.get("applied"):
+                continue
+            mx = sc.get("max") or 0
+            scv = sc.get("score")
+            if not mx or scv is None:
+                continue
+            por_param.setdefault(rid, []).append(float(scv) / float(mx) * 100.0)
+
+    def _avg(xs: list[float]) -> float | None:
+        return round(sum(xs) / len(xs), 1) if xs else None
+
+    timeseries = [{"date": d, "avg_percent": _avg(v), "count": len(v)} for d, v in sorted(ts.items())]
+    por_parametro = sorted(
+        ({"id": rid, "name": rule_names.get(rid, rid), "avg_percent": _avg(v), "count": len(v)}
+         for rid, v in por_param.items()),
+        key=lambda x: (x["avg_percent"] if x["avg_percent"] is not None else 999),
+    )
+    por_dificultad = [
+        {"dificultad": d, "avg_percent": _avg(v), "count": len(v)}
+        for d, v in sorted(por_dif.items(), key=lambda kv: _NIVEL_ORDER.index(kv[0]) if kv[0] in _NIVEL_ORDER else 9)
+    ]
+    por_agente = sorted(
+        (
+            {
+                "agente": a, "count": ag_count.get(a, len(v)), "avg_percent": _avg(v),
+                "nivel_actual": nivel_by_name.get(a),
+                "nivel_recomendado": _recommend_nivel(nivel_by_name.get(a), _avg(v)),
+            }
+            for a, v in por_ag.items()
+        ),
+        key=lambda x: (x["avg_percent"] if x["avg_percent"] is not None else -1),
+        reverse=True,
+    )
+
+    return {
+        "total": total,
+        "scored": len(percents),
+        "avg_percent": _avg(percents),
+        "by_status": by_status,
+        "timeseries": timeseries,
+        "por_parametro": por_parametro,
+        "por_dificultad": por_dificultad,
+        "por_agente": por_agente,
+        "agentes": sorted(agentes_set),
+        "departamentos": sorted(deptos_set),
+    }
 
 
 @router.get("/{analysis_id}", response_model=AnalysisDetail)

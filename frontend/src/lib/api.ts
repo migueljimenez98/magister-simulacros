@@ -170,8 +170,32 @@ export const api = {
     delete: (id: string) => request<void>(`/api/analyses/${id}`, { method: "DELETE" }),
     redispatch: (id: string) =>
       request<Analysis>(`/api/analyses/${id}/redispatch`, { method: "POST" }),
+    stats: (params?: { departamento?: string; agente?: string; desde?: string; hasta?: string }) => {
+      const entries: [string, string][] = [];
+      for (const [k, v] of Object.entries(params || {})) {
+        if (v) entries.push([k, String(v)]);
+      }
+      const q = new URLSearchParams(entries).toString();
+      return request<Stats>(`/api/analyses/stats${q ? `?${q}` : ""}`);
+    },
   },
 };
+
+export interface Stats {
+  total: number;
+  scored: number;
+  avg_percent: number | null;
+  by_status: Record<string, number>;
+  timeseries: { date: string; avg_percent: number | null; count: number }[];
+  por_parametro: { id: string; name: string; avg_percent: number | null; count: number }[];
+  por_dificultad: { dificultad: string; avg_percent: number | null; count: number }[];
+  por_agente: {
+    agente: string; count: number; avg_percent: number | null;
+    nivel_actual: string | null; nivel_recomendado: string | null;
+  }[];
+  agentes: string[];
+  departamentos: string[];
+}
 
 // ── Simulacros ────────────────────────────────────────────────────────────────
 export interface Scenario {

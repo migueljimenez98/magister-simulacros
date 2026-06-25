@@ -20,7 +20,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="flex items-center gap-6">
             <h1 className="font-semibold">Magister Simulacros</h1>
             <nav className="flex gap-4 text-sm">
-              <Link href="/dashboard" className="text-muted hover:text-white">Resultados</Link>
+              <Link href="/dashboard" className="text-muted hover:text-white">Dashboard</Link>
+              <Link href="/dashboard/log" className="text-muted hover:text-white">Log de llamadas</Link>
               <Link href="/dashboard/simulacros" className="text-muted hover:text-white">Personalidades y config</Link>
               <Link href="/dashboard/dev" className="text-muted hover:text-white">Dev</Link>
             </nav>
