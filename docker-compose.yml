@@ -1,0 +1,53 @@
+# Local dev de magister-simulacros. Independiente de magister-quality
+# (puertos y BD propios). Sin redis/minio/nginx — ligero.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: magister
+      POSTGRES_PASSWORD: magister
+      POSTGRES_DB: magister_simulacros
+    volumes:
+      - ms_postgres:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U magister"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      # Dentro de la red docker se usa el nombre de servicio (override del .env).
+      DATABASE_URL: postgresql+asyncpg://magister:magister@postgres:5432/magister_simulacros
+      CHECKPOINT_DSN: postgresql://magister:magister@postgres:5432/magister_simulacros
+      ENVIRONMENT: development
+      # El panel corre en :3025 → permitir ese origen en CORS.
+      CORS_ORIGINS: "http://localhost:3025,http://127.0.0.1:3025"
+      TZ: Europe/Madrid
+    command: sh -c "alembic upgrade head && (python -m scripts.seed_simulacros || true) && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "127.0.0.1:8002:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: "http://localhost:8002"
+    environment:
+      NEXT_PUBLIC_API_URL: "http://localhost:8002"
+    depends_on:
+      - api
+    ports:
+      # 3020 lo ocupa otro proyecto (magister-pagos-dashboard) → usamos 3025.
+      - "127.0.0.1:3025:3010"
+
+volumes:
+  ms_postgres:

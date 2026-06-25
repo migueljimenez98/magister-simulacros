@@ -1,0 +1,65 @@
+# Render Blueprint — magister-simulacros (API + dashboard + Postgres).
+# Ligero: sin Redis ni MinIO. Tras el primer deploy: rellenar secretos
+# (sync:false) y los 2 URLs cruzados (NEXT_PUBLIC_API_URL / CORS_ORIGINS).
+
+databases:
+  - name: ms-db
+    plan: free
+    postgresMajorVersion: "16"      # pgvector lo crea la migración 0001
+
+services:
+  - type: web
+    name: ms-api
+    runtime: docker
+    plan: free                      # free duerme tras inactividad; starter para prod
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    dockerCommand: sh -c "alembic upgrade head && (python -m scripts.seed_simulacros || true) && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ms-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DEFAULT_LLM_PROVIDER
+        value: openai
+      - key: DEFAULT_LLM_MODEL
+        value: gpt-4o-mini
+      - key: DEFAULT_LLM_BASE_URL
+        value: https://api.openai.com/v1
+      - key: SIMULACROS_PROJECT_ID
+        value: proj-simulacros
+      - key: DEFAULT_LLM_API_KEY
+        sync: false
+      - key: RETELL_API_KEY
+        sync: false
+      - key: RETELL_AGENT_ID
+        sync: false
+      - key: RETELL_FROM_NUMBER
+        sync: false
+      - key: CRM_ANNOUNCE_TOKEN
+        sync: false
+      - key: CORS_ORIGINS               # = URL del frontend tras el 1er deploy
+        sync: false
+
+  - type: web
+    name: ms-frontend
+    runtime: docker
+    plan: free
+    rootDir: frontend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /
+    # Sin dockerCommand: usamos el CMD del Dockerfile (node server.js, modo
+    # standalone). server.js respeta el $PORT que inyecta Render.
+    envVars:
+      # NEXT_PUBLIC_* se hornea en build: el Dockerfile tiene un ARG con este
+      # mismo nombre, así que Render lo pasa como build-arg. Pon la URL del
+      # backend tras el 1er deploy y haz "Clear build cache & deploy".
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
