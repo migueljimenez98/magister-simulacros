@@ -39,6 +39,7 @@ from ..core.models import (
 )
 from ..services import announce as announce_svc  # noqa: F401  (legacy, superseded by cola)
 from ..services import cola
+from ..services import evaluador_gen
 from ..services import faq_import
 from ..services import persona_gen
 from ..services import leveling
@@ -1134,6 +1135,23 @@ class EvaluadorIn(BaseModel):
     feedback_prompt: str = ""
     report_prompt: str = ""
     rules_table: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class GenerarEvaluadorIn(BaseModel):
+    nombre: str = ""
+    descripcion: str
+
+
+@simulacros_router.post(
+    "/evaluadores/generar", dependencies=[Depends(require_role("admin"))],
+)
+async def generar_evaluador(data: GenerarEvaluadorIn, session: SessionDep) -> dict[str, Any]:
+    """Genera (con IA) un evaluador (rúbrica + prompts) a partir de un guión o
+    descripción. Devuelve un BORRADOR (no se guarda) para revisar y guardar."""
+    if not (data.descripcion or "").strip():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Falta el guión/descripción")
+    draft = await evaluador_gen.generate(data.nombre, data.descripcion)
+    return {"nombre": data.nombre or "Evaluador (IA)", **draft}
 
 
 @simulacros_router.get("/evaluadores/catalogo")

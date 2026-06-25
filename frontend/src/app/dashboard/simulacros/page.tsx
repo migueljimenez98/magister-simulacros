@@ -703,6 +703,8 @@ function EvaluadoresCatalog() {
     queryFn: simulacrosApi.listEvaluadores,
   });
   const [editing, setEditing] = useState<Evaluador | "new" | null>(null);
+  const [draft, setDraft] = useState<EvaluadorInput | null>(null);
+  const [generar, setGenerar] = useState(false);
   const invalidate = () => qc.invalidateQueries({ queryKey: ["sim-evaluadores-cat"] });
 
   return (
@@ -715,12 +717,20 @@ function EvaluadoresCatalog() {
             departamento.
           </p>
         </div>
-        <button
-          onClick={() => setEditing("new")}
-          className="text-sm rounded-lg border border-border px-3 py-2 hover:border-accent"
-        >
-          + Nuevo evaluador
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setGenerar(true)}
+            className="text-sm rounded-lg border border-border px-3 py-2 hover:border-accent"
+          >
+            ✨ Generar con IA
+          </button>
+          <button
+            onClick={() => { setDraft(null); setEditing("new"); }}
+            className="text-sm rounded-lg border border-border px-3 py-2 hover:border-accent"
+          >
+            + Nuevo evaluador
+          </button>
+        </div>
       </div>
       {!evaluadores?.length ? (
         <p className="text-sm text-muted">Sin evaluadores. Crea el primero con “+ Nuevo evaluador”.</p>
@@ -740,11 +750,57 @@ function EvaluadoresCatalog() {
       {editing && (
         <EvaluadorModal
           evaluador={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); invalidate(); }}
+          draft={editing === "new" ? draft ?? undefined : undefined}
+          onClose={() => { setEditing(null); setDraft(null); }}
+          onSaved={() => { setEditing(null); setDraft(null); invalidate(); }}
+        />
+      )}
+      {generar && (
+        <GenerarEvaluadorModal
+          onClose={() => setGenerar(false)}
+          onGenerated={(d) => { setGenerar(false); setDraft(d); setEditing("new"); }}
         />
       )}
     </section>
+  );
+}
+
+function GenerarEvaluadorModal({
+  onClose, onGenerated,
+}: {
+  onClose: () => void;
+  onGenerated: (draft: EvaluadorInput) => void;
+}) {
+  const [nombre, setNombre] = useState("");
+  const [descripcion, setDescripcion] = useState("");
+  const gen = useMutation({
+    mutationFn: () => simulacrosApi.generarEvaluador({ nombre: nombre.trim() || undefined, descripcion }),
+    onSuccess: (d) => onGenerated(d),
+  });
+  return (
+    <Modal title="Generar evaluador con IA" onClose={onClose}>
+      <div className="space-y-3">
+        <p className="text-sm text-muted">
+          Pega el <strong>guión</strong> o describe cómo debe ser la llamada. La IA crea la rúbrica
+          (parámetros con pesos) y los prompts. Luego lo revisas y lo guardas.
+        </p>
+        <Input label="Nombre del evaluador (opcional)" value={nombre} onChange={setNombre} />
+        <TextArea
+          label="Guión / descripción de la llamada"
+          value={descripcion}
+          onChange={setDescripcion}
+          rows={10}
+        />
+        {gen.isError && <p className="text-sm text-rose-400">No se pudo generar (¿falta la API key de OpenAI?).</p>}
+      </div>
+      <ModalActions
+        onClose={onClose}
+        onSave={() => gen.mutate()}
+        saving={gen.isPending}
+        disabled={!descripcion.trim()}
+        saveLabel={gen.isPending ? "Generando…" : "Generar"}
+      />
+    </Modal>
   );
 }
 
@@ -753,17 +809,19 @@ const EMPTY_EVALUADOR: EvaluadorInput = {
 };
 
 function EvaluadorModal({
-  evaluador, onClose, onSaved,
+  evaluador, draft, onClose, onSaved,
 }: {
   evaluador: Evaluador | null;
+  draft?: EvaluadorInput;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [nombre, setNombre] = useState(evaluador?.nombre ?? "");
-  const [auditor, setAuditor] = useState(evaluador?.auditor_prompt ?? "");
-  const [feedback, setFeedback] = useState(evaluador?.feedback_prompt ?? "");
-  const [report, setReport] = useState(evaluador?.report_prompt ?? "");
-  const [rubric, setRubric] = useState(JSON.stringify(evaluador?.rules_table ?? EMPTY_EVALUADOR.rules_table, null, 2));
+  const base = evaluador ?? draft ?? EMPTY_EVALUADOR;
+  const [nombre, setNombre] = useState(base.nombre ?? "");
+  const [auditor, setAuditor] = useState(base.auditor_prompt ?? "");
+  const [feedback, setFeedback] = useState(base.feedback_prompt ?? "");
+  const [report, setReport] = useState(base.report_prompt ?? "");
+  const [rubric, setRubric] = useState(JSON.stringify(base.rules_table ?? [], null, 2));
   const [err, setErr] = useState("");
 
   const save = useMutation({
@@ -785,7 +843,7 @@ function EvaluadorModal({
   });
 
   return (
-    <Modal title={evaluador ? `Editar evaluador — ${evaluador.nombre}` : "Nuevo evaluador"} onClose={onClose}>
+    <Modal title={evaluador ? `Editar evaluador — ${evaluador.nombre}` : draft ? "Nuevo evaluador (generado con IA — revísalo)" : "Nuevo evaluador"} onClose={onClose}>
       <div className="space-y-3">
         <Input label="Nombre del evaluador" value={nombre} onChange={setNombre} />
         <TextArea label="Auditor (puntúa cada parámetro de la rúbrica)" value={auditor} onChange={setAuditor} rows={5} />

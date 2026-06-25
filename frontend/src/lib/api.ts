@@ -328,6 +328,8 @@ export const simulacrosApi = {
   },
 
   // Catálogo de evaluadores independientes
+  generarEvaluador: (data: { nombre?: string; descripcion: string }) =>
+    request<EvaluadorInput>("/api/simulacros/evaluadores/generar", { method: "POST", json: data }),
   listEvaluadores: () => request<Evaluador[]>("/api/simulacros/evaluadores/catalogo"),
   createEvaluador: (data: EvaluadorInput) =>
     request<Evaluador>("/api/simulacros/evaluadores/catalogo", { method: "POST", json: data }),
