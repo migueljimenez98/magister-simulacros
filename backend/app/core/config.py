@@ -21,8 +21,12 @@ class Settings(BaseSettings):
 
     # Postgres. On Render, set a single standard DATABASE_URL — _normalize_db_urls
     # converts it to asyncpg and derives the psycopg DSN for the checkpointer.
+    # checkpoint_dsn MUST default to "" so the derivation kicks in when
+    # CHECKPOINT_DSN isn't set (e.g. on Render); a non-empty default would make
+    # the checkpointer connect to localhost and time out. Locally, docker-compose
+    # sets CHECKPOINT_DSN explicitly to the postgres service.
     database_url: str = "postgresql+asyncpg://magister:magister@localhost:5432/magister_simulacros"
-    checkpoint_dsn: str = "postgresql://magister:magister@localhost:5432/magister_simulacros"
+    checkpoint_dsn: str = ""
 
     redis_url: str = "redis://localhost:6379/0"
 
