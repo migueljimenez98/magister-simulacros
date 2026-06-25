@@ -49,7 +49,7 @@ export default function LogLlamadasPage() {
           <table className="w-full text-sm">
             <thead className="bg-bg/50 text-muted text-left">
               <tr>
-                <th className="px-4 py-2 font-medium">Comercial</th>
+                <th className="px-4 py-2 font-medium">Agente</th>
                 <th className="px-4 py-2 font-medium">Departamento</th>
                 <th className="px-4 py-2 font-medium">Personalidad</th>
                 <th className="px-4 py-2 font-medium">Nota</th>

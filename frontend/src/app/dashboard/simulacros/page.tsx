@@ -6,8 +6,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   simulacrosApi,
-  type Comercial,
-  type ComercialInput,
   type Departamento,
   type DepartamentoInput,
   type Evaluador,
@@ -40,17 +38,12 @@ const EMPTY_SCENARIO: ScenarioInput = {
 };
 
 type ScenarioModalState = { scenario: Scenario | null; departmentId: string | null; draft?: ScenarioInput };
-type ComercialModalState = { comercial: Comercial | null; departmentId: string | null };
 
 export default function SimulacrosPage() {
   const qc = useQueryClient();
   const { data: scenarios, isLoading } = useQuery({
     queryKey: ["sim-scenarios"],
     queryFn: simulacrosApi.listScenarios,
-  });
-  const { data: comerciales } = useQuery({
-    queryKey: ["sim-comerciales"],
-    queryFn: simulacrosApi.listComerciales,
   });
   const { data: departamentos } = useQuery({
     queryKey: ["sim-departamentos"],
@@ -62,7 +55,6 @@ export default function SimulacrosPage() {
   });
 
   const [scenarioModal, setScenarioModal] = useState<ScenarioModalState | null>(null);
-  const [comercialModal, setComercialModal] = useState<ComercialModalState | null>(null);
   const [deptModal, setDeptModal] = useState<Departamento | "new" | null>(null);
   const [generarModal, setGenerarModal] = useState<{ departmentId: string | null } | null>(null);
   const [testing, setTesting] = useState<Scenario | null>(null);
@@ -87,7 +79,8 @@ export default function SimulacrosPage() {
           <h2 className="text-xl font-semibold">Simulacros</h2>
           <p className="text-sm text-muted">
             Cada <strong>departamento</strong> agrupa sus <strong>personalidades</strong> (personas IA
-            por dificultad), sus comerciales (con su nivel) y sus FAQs comunes por nivel.
+            por dificultad), su evaluador y sus FAQs comunes por nivel. Los agentes se gestionan en
+            la pestaña “Agentes”.
           </p>
         </div>
         <button
@@ -111,15 +104,11 @@ export default function SimulacrosPage() {
               key={dept.id}
               dept={dept}
               scenarios={(scenarios ?? []).filter((s) => s.department_id === dept.id)}
-              comerciales={(comerciales ?? []).filter((c) => c.department_id === dept.id)}
-              allScenarios={scenarios ?? []}
               onEditDept={() => setDeptModal(dept)}
               onNewScenario={() => setScenarioModal({ scenario: null, departmentId: dept.id })}
               onGenerar={() => setGenerarModal({ departmentId: dept.id })}
               onEditScenario={(s) => setScenarioModal({ scenario: s, departmentId: s.department_id ?? dept.id })}
               onTestScenario={(s) => setTesting(s)}
-              onNewComercial={() => setComercialModal({ comercial: null, departmentId: dept.id })}
-              onEditComercial={(c) => setComercialModal({ comercial: c, departmentId: c.department_id ?? dept.id })}
               onChanged={invalidate}
             />
           ))}
@@ -169,16 +158,6 @@ export default function SimulacrosPage() {
           }}
         />
       )}
-      {comercialModal && (
-        <ComercialModal
-          comercial={comercialModal.comercial}
-          departmentId={comercialModal.departmentId}
-          scenarios={scenarios ?? []}
-          departamentos={deptList}
-          onClose={() => setComercialModal(null)}
-          onSaved={() => { setComercialModal(null); invalidate(); }}
-        />
-      )}
       {deptModal && (
         <DepartmentModal
           dept={deptModal === "new" ? null : deptModal}
@@ -195,21 +174,16 @@ export default function SimulacrosPage() {
 // ─── Department section ──────────────────────────────────────────────────────
 
 function DepartmentSection({
-  dept, scenarios, comerciales, allScenarios,
-  onEditDept, onNewScenario, onGenerar, onEditScenario, onTestScenario,
-  onNewComercial, onEditComercial, onChanged,
+  dept, scenarios,
+  onEditDept, onNewScenario, onGenerar, onEditScenario, onTestScenario, onChanged,
 }: {
   dept: Departamento;
   scenarios: Scenario[];
-  comerciales: Comercial[];
-  allScenarios: Scenario[];
   onEditDept: () => void;
   onNewScenario: () => void;
   onGenerar: () => void;
   onEditScenario: (s: Scenario) => void;
   onTestScenario: (s: Scenario) => void;
-  onNewComercial: () => void;
-  onEditComercial: (c: Comercial) => void;
   onChanged: () => void;
 }) {
   const faqsPorNivel = (n: string) => (dept.faqs ?? []).filter((f) => f.nivel === n).length;
@@ -270,57 +244,9 @@ function DepartmentSection({
         )}
       </div>
 
-      {/* Comerciales */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h4 className="font-medium">Comerciales ({comerciales.length})</h4>
-          <button onClick={onNewComercial} className="text-sm text-accent hover:underline">
-            + Comercial
-          </button>
-        </div>
-        <p className="text-xs text-muted">
-          El <strong>nombre</strong> debe coincidir con el alias que envía el CRM; por él se atribuye
-          cada llamada y se aplica su nivel.
-        </p>
-        <div className="bg-bg/40 border border-border rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-bg/50 text-muted text-left">
-              <tr>
-                <th className="px-4 py-2 font-medium">Nombre</th>
-                <th className="px-4 py-2 font-medium">Nivel</th>
-                <th className="px-4 py-2 font-medium">Personalidad por defecto</th>
-                <th className="px-4 py-2 font-medium">Activo</th>
-                <th className="px-4 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {!comerciales.length ? (
-                <tr><td colSpan={5} className="px-4 py-3 text-muted">Sin comerciales todavía.</td></tr>
-              ) : (
-                comerciales.map((c) => (
-                  <tr key={c.id} className="border-t border-border">
-                    <td className="px-4 py-2">{c.nombre}</td>
-                    <td className="px-4 py-2">
-                      <span className={`text-xs px-2 py-0.5 rounded-full border ${DIFF_COLOR[c.nivel ?? ""] ?? "border-border text-muted"}`}>
-                        {c.nivel ?? "—"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 text-muted">
-                      {allScenarios.find((s) => s.id === c.default_scenario_id)?.nombre ?? "—"}
-                    </td>
-                    <td className="px-4 py-2">{c.activo ? "Sí" : "No"}</td>
-                    <td className="px-4 py-2 text-right whitespace-nowrap">
-                      <EvaluarNivelButton comercial={c} onChanged={onChanged} />
-                      <span className="text-border mx-2">·</span>
-                      <button onClick={() => onEditComercial(c)} className="text-accent hover:underline">Editar</button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <p className="text-xs text-muted">
+        Los comerciales/agentes se gestionan en la pestaña <strong>Agentes</strong>.
+      </p>
     </section>
   );
 }
@@ -551,113 +477,6 @@ function GenerarPersonaModal({
   );
 }
 
-// ─── Comercial modal ─────────────────────────────────────────────────────────
-
-function ComercialModal({
-  comercial, departmentId, scenarios, departamentos, onClose, onSaved,
-}: {
-  comercial: Comercial | null;
-  departmentId: string | null;
-  scenarios: Scenario[];
-  departamentos: Departamento[];
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const initialDept = comercial?.department_id ?? departmentId ?? (departamentos[0]?.id ?? null);
-  const [form, setForm] = useState<ComercialInput>(
-    comercial
-      ? {
-          extension: comercial.extension, nombre: comercial.nombre, activo: comercial.activo,
-          default_scenario_id: comercial.default_scenario_id,
-          department_id: comercial.department_id ?? initialDept,
-          nivel: comercial.nivel ?? NIVELES[0],
-        }
-      : {
-          extension: "", nombre: "", activo: true, default_scenario_id: null,
-          department_id: initialDept, nivel: NIVELES[0],
-        },
-  );
-  const deptScenarios = scenarios.filter((s) => !form.department_id || s.department_id === form.department_id);
-  const save = useMutation({
-    mutationFn: () =>
-      comercial
-        ? simulacrosApi.updateComercial(comercial.id, form)
-        : simulacrosApi.createComercial(form),
-    onSuccess: onSaved,
-  });
-  const remove = useMutation({
-    mutationFn: () => comercial ? simulacrosApi.deleteComercial(comercial.id) : Promise.resolve(),
-    onSuccess: onSaved,
-  });
-  const set = (k: keyof ComercialInput, v: string | boolean | null) => setForm((f) => ({ ...f, [k]: v }));
-
-  return (
-    <Modal title={comercial ? "Editar comercial" : "Nuevo comercial"} onClose={onClose}>
-      <div className="space-y-3">
-        <Input label="Nombre (= alias que envía el CRM)" value={form.nombre} onChange={(v) => set("nombre", v)} />
-        <div className="grid grid-cols-2 gap-3">
-          <label className="text-sm space-y-1 block">
-            <span className="text-muted">Departamento</span>
-            <select
-              value={form.department_id ?? ""}
-              onChange={(e) => setForm((f) => ({ ...f, department_id: e.target.value || null, default_scenario_id: null }))}
-              className="w-full bg-bg border border-border rounded-lg px-3 py-2"
-            >
-              <option value="">—</option>
-              {departamentos.map((d) => <option key={d.id} value={d.id}>{d.nombre}</option>)}
-            </select>
-          </label>
-          <label className="text-sm space-y-1 block">
-            <span className="text-muted">Nivel de dificultad</span>
-            <select
-              value={form.nivel ?? ""}
-              onChange={(e) => set("nivel", e.target.value || null)}
-              className="w-full bg-bg border border-border rounded-lg px-3 py-2"
-            >
-              {NIVELES.map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
-          </label>
-        </div>
-        <label className="text-sm space-y-1 block">
-          <span className="text-muted">Personalidad por defecto (opcional)</span>
-          <select
-            value={form.default_scenario_id ?? ""}
-            onChange={(e) => set("default_scenario_id", e.target.value || null)}
-            className="w-full bg-bg border border-border rounded-lg px-3 py-2"
-          >
-            <option value="">— (el sistema elige por nivel) —</option>
-            {deptScenarios.map((s) => <option key={s.id} value={s.id}>{s.nombre} ({s.dificultad})</option>)}
-          </select>
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={form.activo} onChange={(e) => set("activo", e.target.checked)} />
-          Activo
-        </label>
-      </div>
-      <div className="flex items-center justify-between pt-4">
-        {comercial ? (
-          <button
-            onClick={() => { if (confirm("¿Borrar comercial?")) remove.mutate(); }}
-            className="text-sm text-rose-400 hover:text-rose-300"
-          >
-            Borrar
-          </button>
-        ) : <span />}
-        <div className="flex gap-2">
-          <button onClick={onClose} className="text-sm rounded-lg border border-border px-3 py-2 hover:border-accent">Cancelar</button>
-          <button
-            onClick={() => save.mutate()}
-            disabled={save.isPending || !form.nombre.trim()}
-            className="text-sm rounded-lg bg-accent text-black font-medium px-3 py-2 hover:opacity-90 disabled:opacity-50"
-          >
-            {save.isPending ? "Guardando…" : "Guardar"}
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
 // ─── Department modal (nombre + FAQs comunes estructuradas) ───────────────────
 
 function DepartmentModal({
@@ -872,27 +691,6 @@ function TestModal({ scenario, onClose }: { scenario: Scenario; onClose: () => v
         saveLabel="Lanzar"
       />
     </Modal>
-  );
-}
-
-// ─── Nivel: evaluar ahora ───────────────────────────────────────────────────
-
-function EvaluarNivelButton({ comercial, onChanged }: { comercial: Comercial; onChanged: () => void }) {
-  const m = useMutation({
-    mutationFn: () => simulacrosApi.evaluateLevel(comercial.id),
-    onSuccess: (r) => {
-      if (r.changed) onChanged();
-      alert(
-        r.changed
-          ? `${comercial.nombre}: ${r.from} → ${r.nivel}\n(${r.reason})`
-          : `${comercial.nombre}: sin cambio de nivel.\n(${r.reason})`,
-      );
-    },
-  });
-  return (
-    <button onClick={() => m.mutate()} disabled={m.isPending} className="text-muted hover:text-white">
-      {m.isPending ? "…" : "Evaluar nivel"}
-    </button>
   );
 }
 

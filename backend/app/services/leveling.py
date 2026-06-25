@@ -166,9 +166,11 @@ async def evaluate_by_name(
 ) -> dict[str, Any] | None:
     """Find a comercial by name and run the engine. Used by the post-call hook
     (simulacros are attributed by name). Returns None if no comercial matches."""
-    comercial = (await session.execute(
+    # An agent can have a membership per department; level the ACTIVE one.
+    rows = (await session.execute(
         select(SimulacroComercial).where(SimulacroComercial.nombre == nombre)
-    )).scalar_one_or_none()
+    )).scalars().all()
+    comercial = next((c for c in rows if c.activo), rows[0] if rows else None)
     if comercial is None:
         return None
     return await evaluate_and_apply(session, comercial, persist=True, auto_trigger=auto_trigger)

@@ -42,7 +42,6 @@ export default function DashboardPage() {
       <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-xl font-semibold">Dashboard</h2>
-          <p className="text-sm text-muted">Progreso de los comerciales en los simulacros.</p>
         </div>
         <div className="flex gap-2">
           <select
@@ -58,7 +57,7 @@ export default function DashboardPage() {
             onChange={(e) => setAgente(e.target.value)}
             className="text-sm bg-bg border border-border rounded-lg px-3 py-2"
           >
-            <option value="">Todos los comerciales</option>
+            <option value="">Todos los agentes</option>
             {(opts?.agentes ?? []).map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
         </div>
@@ -66,6 +65,8 @@ export default function DashboardPage() {
 
       {isLoading || !data ? (
         <p className="text-muted">Cargando…</p>
+      ) : data.scored === 0 && data.total === 0 ? (
+        <PrimerosPasos />
       ) : data.scored === 0 ? (
         <p className="text-muted">
           Aún no hay simulacros puntuados con estos filtros. Cuando se evalúen llamadas, verás aquí el progreso.
@@ -77,20 +78,44 @@ export default function DashboardPage() {
   );
 }
 
+function PrimerosPasos() {
+  const pasos = [
+    { n: 1, t: "Crea un departamento", d: "Con sus FAQs comunes por nivel y su evaluador.", href: "/dashboard/simulacros" },
+    { n: 2, t: "Crea personalidades", d: "Las personas IA que reciben la llamada (a mano o con IA).", href: "/dashboard/simulacros" },
+    { n: 3, t: "Da de alta agentes", d: "Asígnalos a un departamento y marca el activo.", href: "/dashboard/agentes" },
+    { n: 4, t: "Lanza un simulacro", d: "Desde “Dev” o llamando al número del panel /simulacro.", href: "/dashboard/dev" },
+  ];
+  return (
+    <div className="bg-card border border-border rounded-2xl p-6 space-y-4 max-w-2xl">
+      <div>
+        <h3 className="font-semibold">Primeros pasos</h3>
+        <p className="text-sm text-muted">Aún no hay simulacros. Configúralo en 4 pasos:</p>
+      </div>
+      <ol className="space-y-3">
+        {pasos.map((p) => (
+          <li key={p.n}>
+            <a href={p.href} className="flex items-start gap-3 group">
+              <span className="shrink-0 w-6 h-6 rounded-full bg-accent text-black text-sm font-bold flex items-center justify-center">{p.n}</span>
+              <span>
+                <span className="font-medium group-hover:underline">{p.t}</span>
+                <span className="block text-sm text-muted">{p.d}</span>
+              </span>
+            </a>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 function Content({ data }: { data: Stats }) {
   return (
     <div className="space-y-6">
       {/* KPIs */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-3">
         <Kpi label="Nota media" value={pct(data.avg_percent)} valueClass={scoreColor(data.avg_percent)} />
         <Kpi label="Llamadas evaluadas" value={String(data.scored)} sub={`${data.total} en total`} />
-        <Kpi label="Comerciales" value={String(data.por_agente.length)} />
-        <Kpi
-          label="Mejor comercial"
-          value={data.por_agente[0]?.agente ?? "—"}
-          sub={data.por_agente[0] ? pct(data.por_agente[0].avg_percent) : ""}
-          small
-        />
+        <Kpi label="Agentes" value={String(data.por_agente.length)} />
       </div>
 
       {/* Progreso temporal */}
@@ -126,13 +151,13 @@ function Content({ data }: { data: Stats }) {
         </Card>
       </div>
 
-      {/* Por comercial: nivel actual + recomendado */}
-      <Card title="Por comercial" subtitle="Nota media, nivel actual y nivel recomendado">
+      {/* Por agente: nivel actual + recomendado */}
+      <Card title="Por agente" subtitle="Nota media, nivel actual y nivel recomendado">
         <div className="overflow-hidden rounded-xl border border-border">
           <table className="w-full text-sm">
             <thead className="bg-bg/50 text-muted text-left">
               <tr>
-                <th className="px-4 py-2 font-medium">Comercial</th>
+                <th className="px-4 py-2 font-medium">Agente</th>
                 <th className="px-4 py-2 font-medium">Llamadas</th>
                 <th className="px-4 py-2 font-medium">Nota media</th>
                 <th className="px-4 py-2 font-medium">Nivel actual</th>

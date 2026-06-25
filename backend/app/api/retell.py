@@ -121,23 +121,40 @@ def _collect_signals(*sources: Any) -> dict[str, str]:
     return out
 
 
+def _pick_active(rows: list[SimulacroComercial]) -> SimulacroComercial | None:
+    """An agent (by nombre) can have one membership per department; only ONE is
+    active. Given candidate rows, return the active one (else the first)."""
+    if not rows:
+        return None
+    for r in rows:
+        if r.activo:
+            return r
+    return rows[0]
+
+
+async def _active_comercial_by_name(session: SessionDep, nombre: str) -> SimulacroComercial | None:
+    rows = (await session.execute(
+        select(SimulacroComercial).where(SimulacroComercial.nombre == nombre)
+    )).scalars().all()
+    return _pick_active(list(rows))
+
+
 async def _comercial_from_signals(
     session: SessionDep, signals: dict[str, str]
 ) -> SimulacroComercial | None:
     """Resolve a comercial from a SIP-header/dynamic-variable identity value.
-    Matches by extension (exact or digits) or by name. None if no hint."""
+    Matches by extension (exact or digits) or by name → the agent's ACTIVE
+    department membership. None if no hint."""
     candidates = [v for k, v in signals.items()
                   if any(t in k.lower() for t in _COMERCIAL_HINT_KEYS) and v.strip()]
     for val in candidates:
         val = val.strip()
-        hit = (await session.execute(
+        hit = _pick_active((await session.execute(
             select(SimulacroComercial).where(SimulacroComercial.extension == val)
-        )).scalar_one_or_none()
+        )).scalars().all())
         if hit:
             return hit
-        hit = (await session.execute(
-            select(SimulacroComercial).where(SimulacroComercial.nombre == val)
-        )).scalar_one_or_none()
+        hit = await _active_comercial_by_name(session, val)
         if hit:
             return hit
         digits = _digits(val)
@@ -155,9 +172,9 @@ async def _comercial_for_caller(session: SessionDep, from_number: str) -> Simula
     raw = (from_number or "").strip()
     if not raw:
         return None
-    hit = (await session.execute(
+    hit = _pick_active((await session.execute(
         select(SimulacroComercial).where(SimulacroComercial.extension == raw)
-    )).scalar_one_or_none()
+    )).scalars().all())
     if hit:
         return hit
     digits = _digits(raw)
@@ -408,9 +425,7 @@ async def inbound_dynamic_variables(request: Request, session: SessionDep) -> di
             via = "announce"
             announced_name = announced["agente"]
             announced_scenario = announced.get("scenario_id") or ""
-            comercial = (await session.execute(
-                select(SimulacroComercial).where(SimulacroComercial.nombre == announced_name)
-            )).scalar_one_or_none()
+            comercial = await _active_comercial_by_name(session, announced_name)
     if comercial is None and not announced_name:
         comercial = await _comercial_for_caller(session, from_number)
         via = "caller_id" if comercial else "none"
@@ -785,6 +800,17 @@ async def list_comerciales(session: SessionDep) -> list[dict[str, Any]]:
     return [_comercial_to_dict(c) for c in rows]
 
 
+async def _enforce_single_active(session: SessionDep, nombre: str, keep_id: str) -> None:
+    """An agent can have a membership per department but be ACTIVE in only one.
+    Deactivate the agent's other memberships."""
+    rows = (await session.execute(
+        select(SimulacroComercial).where(SimulacroComercial.nombre == nombre)
+    )).scalars().all()
+    for r in rows:
+        if r.id != keep_id and r.activo:
+            r.activo = False
+
+
 @simulacros_router.post(
     "/comerciales", status_code=201,
     dependencies=[Depends(require_role("admin"))],
@@ -792,6 +818,9 @@ async def list_comerciales(session: SessionDep) -> list[dict[str, Any]]:
 async def create_comercial(data: ComercialIn, session: SessionDep) -> dict[str, Any]:
     c = SimulacroComercial(**data.model_dump())
     session.add(c)
+    await session.flush()
+    if c.activo:
+        await _enforce_single_active(session, c.nombre, c.id)
     await session.commit()
     await session.refresh(c)
     return _comercial_to_dict(c)
@@ -807,6 +836,8 @@ async def update_comercial(comercial_id: str, data: ComercialIn, session: Sessio
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Comercial no encontrado")
     for k, v in data.model_dump().items():
         setattr(c, k, v)
+    if c.activo:
+        await _enforce_single_active(session, c.nombre, c.id)
     await session.commit()
     await session.refresh(c)
     return _comercial_to_dict(c)
@@ -840,9 +871,7 @@ async def _process_announce(
     PICK the scenario (sealed now, not at call time), arm Retell for the next
     inbound call, and return the "OK / Cambiado" summary. Shared by the authed
     panel endpoint and the token-protected CRM endpoint."""
-    comercial = (await session.execute(
-        select(SimulacroComercial).where(SimulacroComercial.nombre == agente_nombre)
-    )).scalar_one_or_none()
+    comercial = await _active_comercial_by_name(session, agente_nombre)
     scenario = await _pick_scenario(session, comercial, explicit_id=scenario_id or None)
 
     # CRM / Dev simulator: the call is imminent → claim the turn now.
@@ -893,9 +922,7 @@ async def cola_join(data: ColaJoinIn, session: SessionDep) -> dict[str, Any]:
     nombre = (data.nombre or "").strip()
     if not nombre:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Falta el nombre de seguimiento")
-    comercial = (await session.execute(
-        select(SimulacroComercial).where(SimulacroComercial.nombre == nombre)
-    )).scalar_one_or_none()
+    comercial = await _active_comercial_by_name(session, nombre)
     scenario = await _pick_scenario(session, comercial, explicit_id=None)
     res = cola.join(nombre, data.from_number, scenario.id if scenario else "")
     res["escenario"] = scenario.nombre if scenario else None

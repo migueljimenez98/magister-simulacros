@@ -166,9 +166,9 @@ async def stats(
     project = await session.get(QualityProject, settings.simulacros_project_id)
     rule_names = {r.get("id"): (r.get("name") or r.get("id")) for r in (project.rules_table or [])} if project else {}
 
-    # Comercial → current level.
+    # Comercial → current level (of their ACTIVE department membership).
     comerciales = (await session.execute(select(SimulacroComercial))).scalars().all()
-    nivel_by_name = {c.nombre: c.nivel for c in comerciales}
+    nivel_by_name = {c.nombre: c.nivel for c in comerciales if c.activo}
 
     total = len(rows)
     by_status: dict[str, int] = {}

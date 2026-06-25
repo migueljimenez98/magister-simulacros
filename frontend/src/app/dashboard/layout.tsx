@@ -1,17 +1,29 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 import { getToken, setToken } from "@/lib/api";
 
+const NAV = [
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/dashboard/log", label: "Log de llamadas" },
+  { href: "/dashboard/agentes", label: "Agentes" },
+  { href: "/dashboard/simulacros", label: "Personalidades y config" },
+  { href: "/dashboard/dev", label: "Dev" },
+];
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (!getToken()) router.replace("/");
   }, [router]);
+
+  const isActive = (href: string) =>
+    href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -20,10 +32,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="flex items-center gap-6">
             <h1 className="font-semibold">Magister Simulacros</h1>
             <nav className="flex gap-4 text-sm">
-              <Link href="/dashboard" className="text-muted hover:text-white">Dashboard</Link>
-              <Link href="/dashboard/log" className="text-muted hover:text-white">Log de llamadas</Link>
-              <Link href="/dashboard/simulacros" className="text-muted hover:text-white">Personalidades y config</Link>
-              <Link href="/dashboard/dev" className="text-muted hover:text-white">Dev</Link>
+              {NAV.map((n) => (
+                <Link
+                  key={n.href}
+                  href={n.href}
+                  className={isActive(n.href) ? "text-white font-medium border-b-2 border-accent pb-1" : "text-muted hover:text-white"}
+                >
+                  {n.label}
+                </Link>
+              ))}
             </nav>
           </div>
           <button

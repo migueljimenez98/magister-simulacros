@@ -71,7 +71,7 @@ function CrmButtonSimulator({ comerciales, scenarios }: { comerciales: Comercial
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
         {comerciales.length > 0 && (
           <label className="text-sm space-y-1 block">
-            <span className="text-muted">Comercial</span>
+            <span className="text-muted">Agente</span>
             <select
               value={comId}
               onChange={(e) => pickComercial(e.target.value)}
@@ -155,7 +155,7 @@ function CrmCallTester({ scenarios }: { scenarios: Scenario[] }) {
         </p>
       </div>
       <div className="grid gap-3 md:grid-cols-3">
-        <Input label="Nombre (comercial)" value={nombre} onChange={setNombre} />
+        <Input label="Nombre (agente)" value={nombre} onChange={setNombre} />
         <Input label="Número a llamar (+34…)" value={numero} onChange={setNumero} />
         <label className="text-sm space-y-1 block">
           <span className="text-muted">Personalidad</span>
