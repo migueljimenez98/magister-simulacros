@@ -48,8 +48,8 @@ entorno o al añadir/quitar números:
  * EDITA SOLO LOS TRES VALORES DE ARRIBA.
  */
 
-// Host de magister-simulacros (con https:// si es por túnel/dominio, o http://ip:8001 en red interna)
-define('MQ_SIMULACRO_HOST',  'https://containers-fraction-msie-exchange.trycloudflare.com');
+// Host de magister-simulacros. PRODUCCIÓN (Render):
+define('MQ_SIMULACRO_HOST',  'https://ms-api-1bqi.onrender.com');
 
 // Token compartido (debe coincidir con CRM_ANNOUNCE_TOKEN del backend/.env)
 define('MQ_SIMULACRO_TOKEN', 'crmtok_TU_TOKEN_AQUI');
