@@ -9,6 +9,7 @@ import {
   type AgenteRow, type Departamento, type ParamScore,
 } from "@/lib/api";
 import { nota10, notaHsl } from "@/lib/score";
+import { ConfirmDelete } from "@/components/confirm-delete";
 
 const NIVELES = ["facil", "medio", "dificil"] as const;
 const DIFF_COLOR: Record<string, string> = {
@@ -342,7 +343,18 @@ function AgenteDetailModal({
 }
 
 function CallDetailModal({ id, onClose }: { id: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [confirmar, setConfirmar] = useState(false);
   const { data: a, isLoading } = useQuery({ queryKey: ["analysis-detail", id], queryFn: () => api.analyses.get(id) });
+  const borrar = useMutation({
+    mutationFn: () => api.analyses.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stats"] });
+      qc.invalidateQueries({ queryKey: ["analyses"] });
+      qc.invalidateQueries({ queryKey: ["agente-historial"] });
+      onClose();
+    },
+  });
   const snap = (a?.crm_snapshot || {}) as Record<string, unknown>;
   const sim = (snap._simulacro || {}) as Record<string, unknown>;
   const transcript =
@@ -410,10 +422,20 @@ function CallDetailModal({ id, onClose }: { id: string; onClose: () => void }) {
           ) : (
             <p className="text-xs text-muted">Sin transcripción guardada para esta llamada.</p>
           )}
-          <div className="flex justify-end">
+          <div className="flex justify-between items-center">
+            <button onClick={() => setConfirmar(true)} className="text-sm text-rose-400 hover:text-rose-300">Eliminar simulacro</button>
             <Link href={`/dashboard/detail?id=${id}`} className="text-sm text-accent hover:underline">Abrir en página completa →</Link>
           </div>
         </div>
+      )}
+      {confirmar && (
+        <ConfirmDelete
+          title="Eliminar simulacro"
+          message={`Se borrará esta llamada (${a?.agente_nombre ?? ""}) y su evaluación de la base de datos.`}
+          pending={borrar.isPending}
+          onConfirm={() => borrar.mutate()}
+          onClose={() => setConfirmar(false)}
+        />
       )}
     </Modal>
   );
