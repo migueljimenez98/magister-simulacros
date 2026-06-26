@@ -244,6 +244,8 @@ function DepartmentSection({
 
 // ─── Personalidades: tabla ───────────────────────────────────────────────────
 
+const NIVEL_ORDER: Record<string, number> = { facil: 0, medio: 1, dificil: 2 };
+
 function PersonalidadTable({
   scenarios, onEdit, onTest, onChanged,
 }: {
@@ -252,13 +254,24 @@ function PersonalidadTable({
   onTest: (s: Scenario) => void;
   onChanged: () => void;
 }) {
+  const [sort, setSort] = useState<{ field: "nombre" | "dificultad"; dir: 1 | -1 }>({ field: "nombre", dir: 1 });
+  const sorted = [...scenarios].sort((a, b) => {
+    const cmp = sort.field === "nombre"
+      ? a.nombre.localeCompare(b.nombre)
+      : (NIVEL_ORDER[a.dificultad] ?? 9) - (NIVEL_ORDER[b.dificultad] ?? 9);
+    return cmp * sort.dir;
+  });
+  const toggle = (field: "nombre" | "dificultad") =>
+    setSort((s) => (s.field === field ? { field, dir: (s.dir === 1 ? -1 : 1) as 1 | -1 } : { field, dir: 1 }));
+  const arrow = (field: string) => (sort.field === field ? (sort.dir === 1 ? " ▲" : " ▼") : "");
+
   return (
     <div className="bg-bg/40 border border-border rounded-xl overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-bg/50 text-muted text-left">
           <tr>
-            <th className="px-4 py-2 font-medium">Nombre</th>
-            <th className="px-4 py-2 font-medium">Dificultad</th>
+            <th onClick={() => toggle("nombre")} className="px-4 py-2 font-medium cursor-pointer select-none hover:text-white">Nombre{arrow("nombre")}</th>
+            <th onClick={() => toggle("dificultad")} className="px-4 py-2 font-medium cursor-pointer select-none hover:text-white">Dificultad{arrow("dificultad")}</th>
             <th className="px-4 py-2 font-medium">Producto</th>
             <th className="px-4 py-2 font-medium">Persona</th>
             <th className="px-4 py-2 font-medium">Estado</th>
@@ -266,7 +279,7 @@ function PersonalidadTable({
           </tr>
         </thead>
         <tbody>
-          {scenarios.map((s) => (
+          {sorted.map((s) => (
             <PersonalidadRow key={s.id} scenario={s} onEdit={() => onEdit(s)} onTest={() => onTest(s)} onChanged={onChanged} />
           ))}
         </tbody>
