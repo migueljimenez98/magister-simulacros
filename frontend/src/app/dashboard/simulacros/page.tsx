@@ -223,12 +223,11 @@ function DepartmentSection({
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h4 className="font-medium">Personalidades ({scenarios.length})</h4>
-          <div className="flex items-center gap-3">
-            <button onClick={onGenerar} className="text-sm text-accent hover:underline">
+          <div className="flex gap-2">
+            <button onClick={onGenerar} className="text-sm rounded-lg border border-border px-3 py-2 hover:border-accent">
               ✨ Generar con IA
             </button>
-            <span className="text-border">·</span>
-            <button onClick={onNewScenario} className="text-sm text-accent hover:underline">
+            <button onClick={onNewScenario} className="text-sm rounded-lg border border-border px-3 py-2 hover:border-accent">
               + Nueva personalidad
             </button>
           </div>
