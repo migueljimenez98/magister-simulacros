@@ -208,6 +208,7 @@ export interface AgenteRow {
   nivel_actual: string | null;
   departamento_activo: string | null;
   nivel_recomendado: string | null;
+  ultima_id: string | null;
   ultima_fecha: string | null;
   ultima_nota: number | null;
   ultimo_departamento: string | null;

@@ -154,9 +154,9 @@ async def stats(
             pass
 
     stmt = select(
-        QualityAnalysis.agente_nombre, QualityAnalysis.departamento, QualityAnalysis.status,
-        QualityAnalysis.percent_quality, QualityAnalysis.scores, QualityAnalysis.crm_snapshot,
-        QualityAnalysis.created_at,
+        QualityAnalysis.id, QualityAnalysis.agente_nombre, QualityAnalysis.departamento,
+        QualityAnalysis.status, QualityAnalysis.percent_quality, QualityAnalysis.scores,
+        QualityAnalysis.crm_snapshot, QualityAnalysis.created_at,
     )
     for c in conds:
         stmt = stmt.where(c)
@@ -184,12 +184,13 @@ async def stats(
     ag_count: dict[str, int] = {}                # agente -> total calls
     ag_last: dict[str, dict[str, Any]] = {}      # agente -> last call info
 
-    for agente_nombre, depto, st, pq, scores, snap, created in rows:
+    for aid, agente_nombre, depto, st, pq, scores, snap, created in rows:
         by_status[st] = by_status.get(st, 0) + 1
         if agente_nombre:
             ag_count[agente_nombre] = ag_count.get(agente_nombre, 0) + 1
             # rows are ascending by created_at → keep overwriting = most recent.
             ag_last[agente_nombre] = {
+                "id": aid,
                 "fecha": created.isoformat() if created else None,
                 "nota": float(pq) if pq is not None else None,
                 "departamento": depto,
@@ -250,6 +251,7 @@ async def stats(
             "nivel_actual": activa["nivel"] if activa else None,
             "departamento_activo": activa["departamento"] if activa else None,
             "nivel_recomendado": _recommend_nivel(activa["nivel"] if activa else None, avg),
+            "ultima_id": (ag_last.get(n) or {}).get("id"),
             "ultima_fecha": (ag_last.get(n) or {}).get("fecha"),
             "ultima_nota": (ag_last.get(n) or {}).get("nota"),
             "ultimo_departamento": (ag_last.get(n) or {}).get("departamento"),

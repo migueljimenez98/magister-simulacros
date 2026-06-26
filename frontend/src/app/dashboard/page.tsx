@@ -35,6 +35,7 @@ export default function AgentesDashboard() {
   const [departamento, setDepartamento] = useState("");
   const [detalle, setDetalle] = useState<AgenteRow | null>(null);
   const [nuevo, setNuevo] = useState(false);
+  const [verCall, setVerCall] = useState<string | null>(null);
 
   const { data: opts } = useQuery({ queryKey: ["stats-opts"], queryFn: () => api.analyses.stats() });
   const { data, isLoading } = useQuery({
@@ -99,8 +100,16 @@ export default function AgentesDashboard() {
                     <tr key={a.agente} className="border-t border-border hover:bg-bg/40">
                       <td className="px-4 py-2 font-medium">{a.agente}</td>
                       <td className="px-4 py-2"><DeptChips memberships={a.memberships} /></td>
-                      <td className="px-4 py-2 text-muted whitespace-nowrap">{fdate(a.ultima_fecha)}{a.ultimo_departamento ? <span className="text-xs"> · {a.ultimo_departamento}</span> : ""}</td>
-                      <td className="px-4 py-2"><Nota v={a.ultima_nota} /></td>
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        {a.ultima_id ? (
+                          <button onClick={() => setVerCall(a.ultima_id)} className="text-muted hover:text-white hover:underline">
+                            {fdate(a.ultima_fecha)}{a.ultimo_departamento ? <span className="text-xs"> · {a.ultimo_departamento}</span> : ""}
+                          </button>
+                        ) : <span className="text-muted">{fdate(a.ultima_fecha)}</span>}
+                      </td>
+                      <td className="px-4 py-2">
+                        {a.ultima_id ? <button onClick={() => setVerCall(a.ultima_id)}><Nota v={a.ultima_nota} /></button> : <Nota v={a.ultima_nota} />}
+                      </td>
                       <td className="px-4 py-2 text-muted tabular-nums">{a.count}</td>
                       <td className="px-4 py-2"><Nota v={a.avg_percent} /></td>
                       <td className="px-4 py-2">
@@ -155,6 +164,7 @@ export default function AgentesDashboard() {
           onSaved={() => { setNuevo(false); invalidate(); }}
         />
       )}
+      {verCall && <CallDetailModal id={verCall} onClose={() => setVerCall(null)} />}
     </div>
   );
 }
@@ -317,7 +327,7 @@ function AgenteDetailModal({
                     <td className="px-3 py-1.5 text-muted truncate max-w-[160px]">{r.escenario || "—"}</td>
                     <td className="px-3 py-1.5"><Nota v={r.percent_quality} /></td>
                     <td className="px-3 py-1.5 text-right">
-                      <button onClick={() => setVerCall(r.id)} className="text-accent hover:underline">Ver</button>
+                      <button onClick={() => setVerCall(r.id)} className="text-accent hover:underline whitespace-nowrap">Ver detalles</button>
                     </td>
                   </tr>
                 ))}

@@ -127,17 +127,12 @@ export default function SimulacrosPage() {
           <p className="text-sm text-muted">
             Estas personalidades no están asignadas a ningún departamento. Edítalas para asignarlas.
           </p>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {huerfanos.map((s) => (
-              <PersonalidadCard
-                key={s.id}
-                scenario={s}
-                onEdit={() => setScenarioModal({ scenario: s, departmentId: s.department_id ?? null })}
-                onTest={() => setTesting(s)}
-                onChanged={invalidate}
-              />
-            ))}
-          </div>
+          <PersonalidadTable
+            scenarios={huerfanos}
+            onEdit={(s) => setScenarioModal({ scenario: s, departmentId: s.department_id ?? null })}
+            onTest={(s) => setTesting(s)}
+            onChanged={invalidate}
+          />
         </section>
       )}
 
@@ -236,17 +231,7 @@ function DepartmentSection({
         {!scenarios.length ? (
           <p className="text-sm text-muted">Sin personalidades todavía en este departamento.</p>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {scenarios.map((s) => (
-              <PersonalidadCard
-                key={s.id}
-                scenario={s}
-                onEdit={() => onEditScenario(s)}
-                onTest={() => onTestScenario(s)}
-                onChanged={onChanged}
-              />
-            ))}
-          </div>
+          <PersonalidadTable scenarios={scenarios} onEdit={onEditScenario} onTest={onTestScenario} onChanged={onChanged} />
         )}
       </div>
 
@@ -257,9 +242,40 @@ function DepartmentSection({
   );
 }
 
-// ─── Personalidad card ───────────────────────────────────────────────────────
+// ─── Personalidades: tabla ───────────────────────────────────────────────────
 
-function PersonalidadCard({
+function PersonalidadTable({
+  scenarios, onEdit, onTest, onChanged,
+}: {
+  scenarios: Scenario[];
+  onEdit: (s: Scenario) => void;
+  onTest: (s: Scenario) => void;
+  onChanged: () => void;
+}) {
+  return (
+    <div className="bg-bg/40 border border-border rounded-xl overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-bg/50 text-muted text-left">
+          <tr>
+            <th className="px-4 py-2 font-medium">Nombre</th>
+            <th className="px-4 py-2 font-medium">Dificultad</th>
+            <th className="px-4 py-2 font-medium">Producto</th>
+            <th className="px-4 py-2 font-medium">Persona</th>
+            <th className="px-4 py-2 font-medium">Estado</th>
+            <th className="px-4 py-2"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {scenarios.map((s) => (
+            <PersonalidadRow key={s.id} scenario={s} onEdit={() => onEdit(s)} onTest={() => onTest(s)} onChanged={onChanged} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PersonalidadRow({
   scenario: s, onEdit, onTest, onChanged,
 }: {
   scenario: Scenario;
@@ -278,46 +294,43 @@ function PersonalidadCard({
   });
 
   return (
-    <div className={`bg-card border rounded-2xl p-4 space-y-3 ${s.activo ? "border-border" : "border-border opacity-60"}`}>
-      <div className="flex items-start justify-between gap-2">
-        <h4 className="font-medium leading-snug">{s.nombre}</h4>
-        <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full border ${DIFF_COLOR[s.dificultad] ?? "border-border text-muted"}`}>
-          {s.dificultad}
-        </span>
-      </div>
-      {s.producto && <p className="text-xs text-muted">{s.producto}</p>}
-      <p className="text-sm text-zinc-300 line-clamp-3">{s.persona}</p>
-
+    <>
+      <tr className={`border-t border-border align-top ${s.activo ? "" : "opacity-60"}`}>
+        <td className="px-4 py-2 font-medium">{s.nombre}</td>
+        <td className="px-4 py-2">
+          <span className={`text-xs px-2 py-0.5 rounded-full border ${DIFF_COLOR[s.dificultad] ?? "border-border text-muted"}`}>{s.dificultad}</span>
+        </td>
+        <td className="px-4 py-2 text-muted truncate max-w-[160px]">{s.producto || "—"}</td>
+        <td className="px-4 py-2 text-muted truncate max-w-[320px]">{s.persona || "—"}</td>
+        <td className="px-4 py-2 whitespace-nowrap">
+          {s.activo ? <span className="text-emerald-300 text-xs">Activa</span> : <span className="text-muted text-xs">Inactiva</span>}
+        </td>
+        <td className="px-4 py-2 text-right whitespace-nowrap">
+          <button onClick={() => setOpen((v) => !v)} className="text-accent hover:underline">{open ? "Ocultar" : "Ver"}</button>
+          <span className="text-border mx-1.5">·</span>
+          <button onClick={onEdit} className="text-muted hover:text-white">Editar</button>
+          <span className="text-border mx-1.5">·</span>
+          <button onClick={onTest} className="text-muted hover:text-white">Probar</button>
+          <span className="text-border mx-1.5">·</span>
+          <button onClick={() => toggle.mutate()} className="text-muted hover:text-white">{s.activo ? "Desactivar" : "Activar"}</button>
+          <span className="text-border mx-1.5">·</span>
+          <button onClick={() => { if (confirm(`¿Borrar la personalidad “${s.nombre}”?`)) remove.mutate(); }} className="text-rose-400 hover:text-rose-300">Borrar</button>
+        </td>
+      </tr>
       {open && (
-        <div className="space-y-2 text-sm border-t border-border pt-3">
-          <Field label="Objeciones" value={s.objeciones} />
-          <Field label="FAQs propias" value={s.faqs} />
-          <Field label="Situación (guion)" value={s.guion} />
-          {s.retell_agent_id && <Field label="Agente Retell" value={s.retell_agent_id} />}
-        </div>
+        <tr className="border-t border-border bg-bg/20">
+          <td colSpan={6} className="px-4 py-3">
+            <div className="grid md:grid-cols-2 gap-3 text-sm">
+              <Field label="Persona" value={s.persona} />
+              <Field label="Objeciones" value={s.objeciones} />
+              <Field label="FAQs propias" value={s.faqs} />
+              <Field label="Situación (guion)" value={s.guion} />
+              {s.retell_agent_id && <Field label="Agente Retell" value={s.retell_agent_id} />}
+            </div>
+          </td>
+        </tr>
       )}
-
-      <div className="flex flex-wrap items-center gap-2 pt-1 text-sm">
-        <button onClick={() => setOpen((v) => !v)} className="text-accent hover:underline">
-          {open ? "Ocultar" : "Ver detalle"}
-        </button>
-        <span className="text-border">·</span>
-        <button onClick={onEdit} className="text-muted hover:text-white">Editar</button>
-        <span className="text-border">·</span>
-        <button onClick={onTest} className="text-muted hover:text-white">Probar</button>
-        <span className="text-border">·</span>
-        <button onClick={() => toggle.mutate()} className="text-muted hover:text-white">
-          {s.activo ? "Desactivar" : "Activar"}
-        </button>
-        <span className="text-border">·</span>
-        <button
-          onClick={() => { if (confirm(`¿Borrar la personalidad “${s.nombre}”?`)) remove.mutate(); }}
-          className="text-rose-400 hover:text-rose-300"
-        >
-          Borrar
-        </button>
-      </div>
-    </div>
+    </>
   );
 }
 
