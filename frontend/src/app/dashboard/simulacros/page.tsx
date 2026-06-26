@@ -110,6 +110,7 @@ export default function SimulacrosPage() {
               key={dept.id}
               dept={dept}
               scenarios={(scenarios ?? []).filter((s) => s.department_id === dept.id)}
+              evaluadorNombre={evaluadores?.find((e) => e.id === dept.evaluador_id)?.nombre ?? null}
               onEditDept={() => setDeptModal(dept)}
               onNewScenario={() => setScenarioModal({ scenario: null, departmentId: dept.id })}
               onGenerar={() => setGenerarModal({ departmentId: dept.id })}
@@ -175,11 +176,12 @@ export default function SimulacrosPage() {
 // ─── Department section ──────────────────────────────────────────────────────
 
 function DepartmentSection({
-  dept, scenarios,
+  dept, scenarios, evaluadorNombre,
   onEditDept, onNewScenario, onGenerar, onEditScenario, onTestScenario, onChanged,
 }: {
   dept: Departamento;
   scenarios: Scenario[];
+  evaluadorNombre: string | null;
   onEditDept: () => void;
   onNewScenario: () => void;
   onGenerar: () => void;
@@ -204,6 +206,9 @@ function DepartmentSection({
                 {faqsPorNivel(n) > 0 ? ` · ${faqsPorNivel(n)} FAQ` : ""}
               </span>
             ))}
+            <span className="text-xs px-2 py-0.5 rounded-full border border-border text-muted">
+              Evaluador: {evaluadorNombre ?? "por defecto"}
+            </span>
           </div>
         </div>
         <button
@@ -254,7 +259,7 @@ function PersonalidadTable({
   onTest: (s: Scenario) => void;
   onChanged: () => void;
 }) {
-  const [sort, setSort] = useState<{ field: "nombre" | "dificultad"; dir: 1 | -1 }>({ field: "nombre", dir: 1 });
+  const [sort, setSort] = useState<{ field: "nombre" | "dificultad"; dir: 1 | -1 }>({ field: "dificultad", dir: 1 });
   const sorted = [...scenarios].sort((a, b) => {
     const cmp = sort.field === "nombre"
       ? a.nombre.localeCompare(b.nombre)
@@ -270,8 +275,8 @@ function PersonalidadTable({
       <table className="w-full text-sm">
         <thead className="bg-bg/50 text-muted text-left">
           <tr>
-            <th onClick={() => toggle("nombre")} className="px-4 py-2 font-medium cursor-pointer select-none hover:text-white">Nombre{arrow("nombre")}</th>
-            <th onClick={() => toggle("dificultad")} className="px-4 py-2 font-medium cursor-pointer select-none hover:text-white">Dificultad{arrow("dificultad")}</th>
+            <th onClick={() => toggle("nombre")} className="px-4 py-2 font-medium cursor-pointer select-none hover:text-white whitespace-nowrap">Nombre{arrow("nombre")}</th>
+            <th onClick={() => toggle("dificultad")} className="px-4 py-2 font-medium cursor-pointer select-none hover:text-white whitespace-nowrap">Dificultad{arrow("dificultad")}</th>
             <th className="px-4 py-2 font-medium">Producto</th>
             <th className="px-4 py-2 font-medium">Persona</th>
             <th className="px-4 py-2 font-medium">Estado</th>
