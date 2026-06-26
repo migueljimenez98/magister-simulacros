@@ -263,12 +263,22 @@ function AgenteDetailModal({
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [verCall, setVerCall] = useState<string | null>(null);
+  const [confirmar, setConfirmar] = useState(false);
   const { data: historial } = useQuery({
     queryKey: ["agente-historial", agente.agente],
     queryFn: () => api.analyses.list({ agente: agente.agente, limit: 50 }),
   });
   const refetchMemb = () => qc.invalidateQueries({ queryKey: ["sim-comerciales"] });
   const after = () => { onChanged(); refetchMemb(); };
+  const borrarAgente = useMutation({
+    mutationFn: () => simulacrosApi.deleteAgente(agente.agente),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stats"] });
+      qc.invalidateQueries({ queryKey: ["analyses"] });
+      refetchMemb();
+      onClose();
+    },
+  });
 
   const usados = new Set(agente.memberships.map((m) => m.department_id));
   const disponibles = departamentos.filter((d) => !usados.has(d.id));
@@ -337,6 +347,18 @@ function AgenteDetailModal({
           </div>
         </div>
       </div>
+      <div className="flex justify-start border-t border-border pt-3 mt-4">
+        <button onClick={() => setConfirmar(true)} className="text-sm text-rose-400 hover:text-rose-300">Eliminar agente</button>
+      </div>
+      {confirmar && (
+        <ConfirmDelete
+          title={`Eliminar agente — ${agente.agente}`}
+          message={`Se borrarán el agente y TODOS sus simulacros (${agente.count}) de la base de datos.`}
+          pending={borrarAgente.isPending}
+          onConfirm={() => borrarAgente.mutate()}
+          onClose={() => setConfirmar(false)}
+        />
+      )}
       {verCall && <CallDetailModal id={verCall} onClose={() => setVerCall(null)} />}
     </Modal>
   );

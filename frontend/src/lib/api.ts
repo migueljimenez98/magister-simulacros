@@ -323,6 +323,8 @@ export const simulacrosApi = {
   deleteScenario: (id: string) =>
     request<void>(`/api/simulacros/scenarios/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
+  deleteAgente: (nombre: string) =>
+    request<{ ok: boolean; fichas: number; simulacros: number }>(`/api/simulacros/agentes/${encodeURIComponent(nombre)}`, { method: "DELETE" }),
   listComerciales: () => request<Comercial[]>("/api/simulacros/comerciales"),
   createComercial: (data: ComercialInput) =>
     request<Comercial>("/api/simulacros/comerciales", { method: "POST", json: data }),

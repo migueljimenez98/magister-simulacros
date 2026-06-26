@@ -856,6 +856,26 @@ async def delete_comercial(comercial_id: str, session: SessionDep) -> None:
     await session.commit()
 
 
+@simulacros_router.delete(
+    "/agentes/{nombre}", dependencies=[Depends(require_role("admin"))],
+)
+async def delete_agente(nombre: str, session: SessionDep) -> dict[str, Any]:
+    """Borra un agente por completo: TODAS sus fichas (membresías de departamento)
+    y TODOS sus simulacros (análisis). Para limpiar agentes de prueba."""
+    membs = (await session.execute(
+        select(SimulacroComercial).where(SimulacroComercial.nombre == nombre)
+    )).scalars().all()
+    analyses = (await session.execute(
+        select(QualityAnalysis).where(QualityAnalysis.agente_nombre == nombre)
+    )).scalars().all()
+    for m in membs:
+        await session.delete(m)
+    for a in analyses:
+        await session.delete(a)
+    await session.commit()
+    return {"ok": True, "fichas": len(membs), "simulacros": len(analyses)}
+
+
 class AnnounceIn(BaseModel):
     agente_nombre: str
     # Optional caller number — if provided, it pins the match precisely (avoids

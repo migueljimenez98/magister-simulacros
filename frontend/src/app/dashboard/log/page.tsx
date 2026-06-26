@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api } from "@/lib/api";
+import { api, type AnalysisListPage } from "@/lib/api";
 import { nota10, notaHsl } from "@/lib/score";
 import { ConfirmDelete } from "@/components/confirm-delete";
 
@@ -31,7 +31,14 @@ export default function LogLlamadasPage() {
   });
   const borrar = useMutation({
     mutationFn: (id: string) => api.analyses.delete(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["analyses"] }); qc.invalidateQueries({ queryKey: ["stats"] }); setDel(null); },
+    onSuccess: (_d, id) => {
+      // Quita la fila al instante de la cache (no espera al refetch).
+      qc.setQueryData<AnalysisListPage>(["analyses"], (old) =>
+        old ? { ...old, items: old.items.filter((i) => i.id !== id), total: Math.max(0, old.total - 1) } : old);
+      qc.invalidateQueries({ queryKey: ["analyses"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+      setDel(null);
+    },
   });
 
   const items = data?.items ?? [];
