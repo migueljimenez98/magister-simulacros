@@ -864,16 +864,32 @@ function EvaluadorModal({
   const [auditor, setAuditor] = useState(base.auditor_prompt ?? "");
   const [feedback, setFeedback] = useState(base.feedback_prompt ?? "");
   const [report, setReport] = useState(base.report_prompt ?? "");
-  const [rubric, setRubric] = useState(JSON.stringify(base.rules_table ?? [], null, 2));
+  const [rules, setRules] = useState<Array<Record<string, unknown>>>(
+    () => (base.rules_table ?? []).map((r) => ({ ...r })),
+  );
   const [err, setErr] = useState("");
 
   const save = useMutation({
     mutationFn: () => {
-      let r: Array<Record<string, unknown>>;
-      try { r = JSON.parse(rubric); } catch { throw new Error("La rúbrica (JSON) no es válida."); }
+      const cleaned = rules
+        .map((r) => {
+          const name = String(r.name ?? "").trim();
+          if (!name) return null;
+          return {
+            ...r,
+            id: String(r.id ?? "").trim() || slugify(name),
+            name,
+            weight: Number(r.weight) || 0,
+            dimension: String(r.dimension ?? "").trim() || "informacion_telefonica",
+            criteria: String(r.criteria ?? "").trim(),
+            description: String(r.description ?? "").trim(),
+          };
+        })
+        .filter((r): r is Record<string, unknown> => r !== null);
+      if (!cleaned.length) throw new Error("Añade al menos un parámetro a la rúbrica.");
       const body: EvaluadorInput = {
         nombre: nombre.trim(), auditor_prompt: auditor, feedback_prompt: feedback,
-        report_prompt: report, rules_table: r,
+        report_prompt: report, rules_table: cleaned,
       };
       return evaluador ? simulacrosApi.updateEvaluador(evaluador.id, body) : simulacrosApi.createEvaluador(body);
     },
@@ -892,15 +908,7 @@ function EvaluadorModal({
         <TextArea label="Auditor (puntúa cada parámetro de la rúbrica)" value={auditor} onChange={setAuditor} rows={5} />
         <TextArea label="Coach (redacta el feedback a la asesora)" value={feedback} onChange={setFeedback} rows={4} />
         <TextArea label="Composer (redacta el informe)" value={report} onChange={setReport} rows={4} />
-        <label className="text-sm space-y-1 block">
-          <span className="text-muted">Rúbrica (JSON: id, name, weight, dimension, criteria, description)</span>
-          <textarea
-            value={rubric}
-            onChange={(e) => setRubric(e.target.value)}
-            rows={10}
-            className="w-full bg-bg border border-border rounded-lg px-3 py-2 font-mono text-xs resize-y"
-          />
-        </label>
+        <RubricEditor rules={rules} setRules={setRules} />
         {err && <p className="text-sm text-rose-400">{err}</p>}
       </div>
       <div className="flex items-center justify-between pt-4">
@@ -924,6 +932,103 @@ function EvaluadorModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+// id técnico a partir del nombre: sin acentos, minúsculas, guion_bajo.
+function slugify(s: string): string {
+  return s
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")
+    .slice(0, 40) || "param";
+}
+
+// Editor de rúbrica con formulario (sin JSON). Cada parámetro = una tarjeta.
+function RubricEditor({
+  rules, setRules,
+}: {
+  rules: Array<Record<string, unknown>>;
+  setRules: (r: Array<Record<string, unknown>>) => void;
+}) {
+  const total = rules.reduce((s, r) => s + (Number(r.weight) || 0), 0);
+  const update = (i: number, key: string, val: unknown) =>
+    setRules(rules.map((r, j) => (j === i ? { ...r, [key]: val } : r)));
+  const removeRow = (i: number) => setRules(rules.filter((_, j) => j !== i));
+  const add = () =>
+    setRules([
+      ...rules,
+      { id: "", name: "", weight: 10, dimension: "informacion_telefonica", criteria: "", description: "" },
+    ]);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted">Rúbrica — parámetros que se puntúan</span>
+        <span className={`text-xs tabular-nums ${total === 100 ? "text-emerald-400" : "text-amber-400"}`}>
+          Peso total: {total}
+        </span>
+      </div>
+
+      {rules.length === 0 && (
+        <p className="text-xs text-muted italic">Sin parámetros todavía. Añade el primero abajo.</p>
+      )}
+
+      {rules.map((r, i) => (
+        <div key={i} className="rounded-lg border border-border bg-bg/40 p-3 space-y-2">
+          <div className="flex gap-2 items-start">
+            <input
+              value={String(r.name ?? "")}
+              onChange={(e) => update(i, "name", e.target.value)}
+              placeholder="Nombre del parámetro (ej. Cierre y próximo paso)"
+              className="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-sm"
+            />
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min={0}
+                value={String(r.weight ?? "")}
+                onChange={(e) => update(i, "weight", e.target.value === "" ? "" : Number(e.target.value))}
+                className="w-16 bg-bg border border-border rounded-lg px-2 py-2 text-sm tabular-nums text-right"
+                aria-label="Peso"
+              />
+              <span className="text-xs text-muted">peso</span>
+            </div>
+            <button
+              onClick={() => removeRow(i)}
+              className="text-rose-400 hover:text-rose-300 px-2 py-2 text-sm"
+              title="Quitar parámetro"
+            >
+              ✕
+            </button>
+          </div>
+          <input
+            value={String(r.criteria ?? "")}
+            onChange={(e) => update(i, "criteria", e.target.value)}
+            placeholder="Criterio breve (qué debe cumplir para puntuar)"
+            className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm"
+          />
+          <textarea
+            value={String(r.description ?? "")}
+            onChange={(e) => update(i, "description", e.target.value)}
+            rows={2}
+            placeholder="Descripción (detalle para el auditor: qué evaluar y cómo)"
+            className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm resize-y"
+          />
+        </div>
+      ))}
+
+      <button
+        onClick={add}
+        className="w-full text-sm rounded-lg border border-dashed border-border px-3 py-2 text-muted hover:border-accent hover:text-white"
+      >
+        + Añadir parámetro
+      </button>
+      <p className="text-xs text-muted">
+        El peso es la importancia relativa de cada parámetro. No tiene que sumar 100 exacto
+        (la nota se normaliza), pero 100 facilita leerla.
+      </p>
+    </div>
   );
 }
 
