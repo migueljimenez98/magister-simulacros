@@ -115,6 +115,7 @@ export interface Analysis {
   percent_quality: number | null;
   feedback_message: string | null;
   error: string | null;
+  admin_feedback: string | null;
   created_at: string;
   updated_at: string;
   scores: Record<string, ParamScore>;
@@ -167,6 +168,8 @@ export const api = {
       return request<{ agentes: string[]; estados: string[] }>(`/api/analyses/facets${q}`);
     },
     get: (id: string) => request<AnalysisDetail>(`/api/analyses/${id}`),
+    feedback: (id: string, value: "up" | "down" | null) =>
+      request<{ ok: boolean; admin_feedback: string | null }>(`/api/analyses/${id}/feedback`, { method: "POST", json: { value } }),
     delete: (id: string) => request<void>(`/api/analyses/${id}`, { method: "DELETE" }),
     redispatch: (id: string) =>
       request<Analysis>(`/api/analyses/${id}/redispatch`, { method: "POST" }),
@@ -225,6 +228,8 @@ export interface Scenario {
   objeciones: string;
   faqs: string;
   guion: string;
+  datos_agente: string;
+  intencion: string;
   retell_agent_id: string | null;
   activo: boolean;
   department_id?: string | null;
@@ -384,10 +389,11 @@ export interface ColaStatus {
   seconds_left?: number;   // solo en "active"
   position?: number;       // solo en "waiting"
   ahead?: number;
+  escenario?: string | null;  // en active/started
+  datos?: string;             // "Datos del simulacro" para la asesora
 }
 export interface ColaJoinResult extends ColaStatus {
   ticket: string;
-  escenario?: string | null;
   dificultad?: string | null;
 }
 

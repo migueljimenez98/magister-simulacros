@@ -32,6 +32,8 @@ const EMPTY_SCENARIO: ScenarioInput = {
   objeciones: "",
   faqs: "",
   guion: "",
+  datos_agente: "",
+  intencion: "",
   retell_agent_id: "",
   activo: true,
   department_id: null,
@@ -342,6 +344,8 @@ function PersonalidadRow({
               <Field label="Objeciones" value={s.objeciones} />
               <Field label="FAQs propias" value={s.faqs} />
               <Field label="Situación (guion)" value={s.guion} />
+              <Field label="Datos para el agente" value={s.datos_agente} />
+              <Field label="Intención" value={s.intencion} />
               {s.retell_agent_id && <Field label="Agente Retell" value={s.retell_agent_id} />}
             </div>
           </td>
@@ -429,6 +433,9 @@ function PersonalidadModal({
           Se suman a las FAQs comunes del nivel del departamento.
         </p>
         <TextArea label="Situación (guion)" value={form.guion} onChange={(v) => set("guion", v)} rows={4} />
+        <TextArea label="Datos para el agente (lo que ve la asesora antes/durante la llamada: a quién llama, contexto)" value={form.datos_agente} onChange={(v) => set("datos_agente", v)} rows={3} />
+        <Input label="Intención del alumno (ej: poco interesado · sin tiempo · quiere colgar)" value={form.intencion} onChange={(v) => set("intencion", v)} />
+        <p className="text-xs text-muted -mt-1">La intención se inyecta en Retell ({"{{intencion}}"}) — el alumno puede incluso colgar si no le enganchas.</p>
         <Input label="Agente Retell (opcional, para voz distinta)" value={form.retell_agent_id ?? ""} onChange={(v) => set("retell_agent_id", v)} />
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={form.activo} onChange={(e) => set("activo", e.target.checked)} />

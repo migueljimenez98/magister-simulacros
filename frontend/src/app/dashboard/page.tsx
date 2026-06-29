@@ -377,6 +377,10 @@ function CallDetailModal({ id, onClose }: { id: string; onClose: () => void }) {
       onClose();
     },
   });
+  const feedback = useMutation({
+    mutationFn: (v: "up" | "down") => api.analyses.feedback(id, a?.admin_feedback === v ? null : v),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["analysis-detail", id] }),
+  });
   const snap = (a?.crm_snapshot || {}) as Record<string, unknown>;
   const sim = (snap._simulacro || {}) as Record<string, unknown>;
   const transcript =
@@ -387,11 +391,24 @@ function CallDetailModal({ id, onClose }: { id: string; onClose: () => void }) {
     <Modal title={a ? `Simulacro — ${a.agente_nombre}` : "Simulacro"} onClose={onClose} wide>
       {isLoading || !a ? <p className="text-muted">Cargando…</p> : (
         <div className="space-y-4">
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex items-center gap-3 text-sm flex-wrap">
             <span className="font-semibold"><Nota v={a.percent_quality} /> <span className="text-muted text-xs">/10</span></span>
             {a.escenario && <span className="text-muted">· {a.escenario}</span>}
             {a.departamento && <span className="text-muted">· {a.departamento}</span>}
             <span className="text-muted text-xs">{fdate(a.created_at)}</span>
+            <span className="ml-auto flex items-center gap-1 text-xs">
+              <span className="text-muted">¿Evaluación correcta?</span>
+              <button
+                onClick={() => feedback.mutate("up")}
+                title="La evaluación es buena"
+                className={`px-2 py-0.5 rounded-lg border ${a.admin_feedback === "up" ? "border-emerald-500 bg-emerald-900/30" : "border-border hover:border-accent"}`}
+              >👍</button>
+              <button
+                onClick={() => feedback.mutate("down")}
+                title="La evaluación es mala"
+                className={`px-2 py-0.5 rounded-lg border ${a.admin_feedback === "down" ? "border-rose-500 bg-rose-900/30" : "border-border hover:border-accent"}`}
+              >👎</button>
+            </span>
           </div>
           {a.error && (
             <div className="text-sm rounded-lg border border-rose-800 bg-rose-950/30 p-3 text-rose-200"><strong>Error:</strong> {a.error}</div>

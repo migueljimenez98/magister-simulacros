@@ -31,7 +31,7 @@ STARTED_TTL = 90.0         # how long we remember "your call connected" for the 
 _lock = threading.Lock()
 _active: dict | None = None
 _waiting: list[dict] = []
-_started: dict[str, float] = {}   # ticket -> ts when its call connected
+_started: dict[str, dict] = {}   # ticket -> {ts, escenario, datos} cuando conecta
 _seq = 0
 
 
@@ -62,7 +62,7 @@ def _promote_locked(now: float) -> None:
 def _gc_locked(now: float) -> None:
     global _active
     # Forget old "your call connected" markers.
-    for t in [t for t, ts in _started.items() if now - ts > STARTED_TTL]:
+    for t in [t for t, v in _started.items() if now - v["ts"] > STARTED_TTL]:
         _started.pop(t, None)
     # Drop waiting tickets whose panel stopped polling (closed tab).
     _waiting[:] = [w for w in _waiting if now - w["last_seen"] <= WAITING_STALE]
@@ -80,16 +80,19 @@ def _status_locked(ticket: str, now: float) -> dict:
             "numero": _numero(),
             "seconds_left": max(0, int(round(_active["deadline"] - now))),
             "nombre": _active["nombre"],
+            "escenario": _active.get("escenario") or "",
+            "datos": _active.get("datos") or "",
         }
     for i, w in enumerate(_waiting):
         if w["ticket"] == ticket:
             return {"status": "waiting", "position": i + 1, "ahead": i, "numero": _numero(), "nombre": w["nombre"]}
-    if ticket in _started:
-        return {"status": "started", "numero": _numero()}
+    st = _started.get(ticket)
+    if st is not None:
+        return {"status": "started", "numero": _numero(), "escenario": st.get("escenario") or "", "datos": st.get("datos") or ""}
     return {"status": "expired", "numero": _numero()}
 
 
-def join(nombre: str, from_number: str = "", scenario_id: str = "") -> dict:
+def join(nombre: str, from_number: str = "", scenario_id: str = "", escenario: str = "", datos: str = "") -> dict:
     """Request a turn. Becomes active immediately if the slot is free, else
     enters the FIFO queue. Returns the ticket + current status."""
     now = time.monotonic()
@@ -98,7 +101,8 @@ def join(nombre: str, from_number: str = "", scenario_id: str = "") -> dict:
         ticket = _new_ticket()
         entry = {
             "ticket": ticket, "nombre": nombre, "from_number": _digits(from_number),
-            "scenario_id": scenario_id or "", "last_seen": now,
+            "scenario_id": scenario_id or "", "escenario": escenario or "", "datos": datos or "",
+            "last_seen": now,
         }
         global _active
         if _active is None:
@@ -122,7 +126,7 @@ def poll(ticket: str) -> dict:
         return _status_locked(ticket, now)
 
 
-def take_now(nombre: str, from_number: str = "", scenario_id: str = "") -> None:
+def take_now(nombre: str, from_number: str = "", scenario_id: str = "", escenario: str = "", datos: str = "") -> None:
     """CRM / Dev simulator: claim the slot immediately (the call is imminent and
     won't wait). Any current panel turn is pushed to the FRONT of the queue so
     it isn't lost — it resumes once this call connects or its margin expires."""
@@ -131,12 +135,13 @@ def take_now(nombre: str, from_number: str = "", scenario_id: str = "") -> None:
         _gc_locked(now)
         global _active
         if _active is not None:
-            bumped = {k: _active[k] for k in ("ticket", "nombre", "from_number", "scenario_id")}
+            bumped = {k: _active[k] for k in ("ticket", "nombre", "from_number", "scenario_id", "escenario", "datos")}
             bumped["last_seen"] = now
             _waiting.insert(0, bumped)
         _active = {
             "ticket": _new_ticket(), "nombre": nombre, "from_number": _digits(from_number),
-            "scenario_id": scenario_id or "", "last_seen": now, "deadline": now + HOLD_SECONDS,
+            "scenario_id": scenario_id or "", "escenario": escenario or "", "datos": datos or "",
+            "last_seen": now, "deadline": now + HOLD_SECONDS,
         }
 
 
@@ -151,7 +156,9 @@ def match_and_consume(from_number: str = "") -> dict | None:
         if _active is None:
             return None
         result = {"agente": _active["nombre"], "scenario_id": _active.get("scenario_id") or ""}
-        _started[_active["ticket"]] = now   # so the panel can show "call detected"
+        _started[_active["ticket"]] = {  # so the panel can show "call detected" + keep the datos
+            "ts": now, "escenario": _active.get("escenario") or "", "datos": _active.get("datos") or "",
+        }
         _promote_locked(now)
         return result
 

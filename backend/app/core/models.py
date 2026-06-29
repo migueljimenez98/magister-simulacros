@@ -109,6 +109,9 @@ class QualityAnalysis(Base):
 
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
     error: Mapped[str | None] = mapped_column(Text)
+    # Feedback del admin sobre la EVALUACIÓN (no la llamada): "up" | "down" | None.
+    # Sirve para medir si el evaluador acierta y, a futuro, afinar sus prompts.
+    admin_feedback: Mapped[str | None] = mapped_column(String(8))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -221,6 +224,11 @@ class SimulacroScenario(Base):
     objeciones: Mapped[str] = mapped_column(Text, nullable=False, default="")
     faqs: Mapped[str] = mapped_column(Text, nullable=False, default="")
     guion: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Ficha que ve la ASESORA antes/durante la llamada (a quién llama, contexto).
+    datos_agente: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    # Intención del alumno IA (p.ej. "poco interesado", "sin tiempo", "quiere colgar").
+    # Se inyecta como variable dinámica {{intencion}} en Retell.
+    intencion: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     retell_agent_id: Mapped[str | None] = mapped_column(String(120))
     activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(

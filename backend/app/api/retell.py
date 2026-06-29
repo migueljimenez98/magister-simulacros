@@ -93,6 +93,8 @@ def _scenario_to_dict(s: SimulacroScenario) -> dict[str, Any]:
         "objeciones": s.objeciones,
         "faqs": s.faqs,
         "guion": s.guion,
+        "datos_agente": s.datos_agente,
+        "intencion": s.intencion,
         "retell_agent_id": s.retell_agent_id,
         "activo": s.activo,
         "department_id": s.department_id,
@@ -652,6 +654,8 @@ class ScenarioIn(BaseModel):
     objeciones: str = ""
     faqs: str = ""
     guion: str = ""
+    datos_agente: str = ""
+    intencion: str = ""
     retell_agent_id: str | None = None
     activo: bool = True
     department_id: str | None = None
@@ -896,7 +900,11 @@ async def _process_announce(
     scenario = await _pick_scenario(session, comercial, explicit_id=scenario_id or None)
 
     # CRM / Dev simulator: the call is imminent → claim the turn now.
-    cola.take_now(agente_nombre, from_number, scenario.id if scenario else "")
+    cola.take_now(
+        agente_nombre, from_number, scenario.id if scenario else "",
+        escenario=scenario.nombre if scenario else "",
+        datos=scenario.datos_agente if scenario else "",
+    )
     log.info(
         "simulacro_announce",
         agente=agente_nombre,
@@ -945,9 +953,14 @@ async def cola_join(data: ColaJoinIn, session: SessionDep) -> dict[str, Any]:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Falta el nombre de seguimiento")
     comercial = await _active_comercial_by_name(session, nombre)
     scenario = await _pick_scenario(session, comercial, explicit_id=None)
-    res = cola.join(nombre, data.from_number, scenario.id if scenario else "")
+    res = cola.join(
+        nombre, data.from_number, scenario.id if scenario else "",
+        escenario=scenario.nombre if scenario else "",
+        datos=scenario.datos_agente if scenario else "",
+    )
     res["escenario"] = scenario.nombre if scenario else None
     res["dificultad"] = scenario.dificultad if scenario else None
+    res["datos"] = scenario.datos_agente if scenario else ""
     return res
 
 

@@ -54,6 +54,9 @@ def build_dynamic_variables(
         "objeciones": str(s.get("objeciones") or ""),
         "faqs": faqs,
         "guion": str(s.get("guion") or ""),
+        # Intención del alumno: el prompt del agente Retell la usa ({{intencion}})
+        # para comportarse (p.ej. poco interesado, sin tiempo) e incluso colgar.
+        "intencion": str(s.get("intencion") or ""),
         "producto": str(s.get("producto") or ""),
         "escenario_nombre": str(s.get("nombre") or ""),
         "nombre_comercial": str(comercial_nombre or ""),

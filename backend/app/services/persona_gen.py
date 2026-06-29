@@ -24,6 +24,8 @@ class _PersonaDraft(BaseModel):
     faqs: str = Field("", description="Dudas/FAQs propias de esta persona (texto).")
     guion: str = Field("", description="Situación/guion: motivo de la llamada y cómo se comporta.")
     producto: str = Field("", description="Producto/servicio (etiqueta CORTA, máx ~8 palabras).")
+    datos_agente: str = Field("", description="Ficha breve que ve la ASESORA antes de llamar (a quién llama, contexto, qué dejó anotado el CRM).")
+    intencion: str = Field("", description="Intención del alumno en 2-5 palabras (ej: 'poco interesado, con prisa').")
 
 
 _INSTRUCTIONS = """Eres un diseñador de simulacros de formación para asesoras comerciales.
@@ -64,4 +66,6 @@ async def generate(
         "faqs": (d.faqs or "").strip(),
         "guion": (d.guion or "").strip(),
         "producto": (d.producto or "").strip(),
+        "datos_agente": (d.datos_agente or "").strip(),
+        "intencion": (d.intencion or "").strip(),
     }

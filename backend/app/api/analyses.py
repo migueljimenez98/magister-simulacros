@@ -45,6 +45,7 @@ class AnalysisOut(BaseModel):
     percent_quality: float | None
     feedback_message: str | None
     error: str | None
+    admin_feedback: str | None = None
     created_at: datetime
     updated_at: datetime
     scores: dict[str, Any] = Field(default_factory=dict)
@@ -290,6 +291,23 @@ async def get_analysis(analysis_id: str, session: SessionDep) -> QualityAnalysis
     if not row:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Analysis not found")
     return row
+
+
+class FeedbackIn(BaseModel):
+    value: str | None = None  # "up" | "down" | null
+
+
+@router.post("/{analysis_id}/feedback", dependencies=[Depends(require_role("admin"))])
+async def set_feedback(analysis_id: str, data: FeedbackIn, session: SessionDep) -> dict[str, Any]:
+    """El admin marca si la EVALUACIÓN fue buena (👍) o mala (👎). Toggle: el mismo
+    valor lo quita. Sirve para medir el evaluador y, a futuro, afinar sus prompts."""
+    row = await session.get(QualityAnalysis, analysis_id)
+    if not row:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Analysis not found")
+    v = (data.value or "").lower()
+    row.admin_feedback = v if v in ("up", "down") else None
+    await session.commit()
+    return {"ok": True, "admin_feedback": row.admin_feedback}
 
 
 @router.delete("/{analysis_id}", status_code=204, dependencies=[Depends(require_role("admin"))])

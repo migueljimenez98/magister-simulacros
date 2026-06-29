@@ -112,6 +112,7 @@ export default function SimulacroPage() {
               <p className="text-xs uppercase tracking-wide text-muted">Llama a este número</p>
               <p className="text-3xl font-bold tabular-nums mt-1 select-all text-emerald-200">{numFmt}</p>
             </div>
+            <DatosSimulacro escenario={state?.escenario} datos={state?.datos} />
             {typeof state?.seconds_left === "number" && (
               <p className="text-sm text-muted">
                 Tienes <span className="tabular-nums font-semibold">{state.seconds_left}s</span> para empezar la llamada.
@@ -125,6 +126,7 @@ export default function SimulacroPage() {
           <div className="bg-card border border-emerald-700 rounded-2xl p-5 space-y-3 text-center">
             <p className="text-lg font-semibold text-emerald-300">✅ Llamada detectada</p>
             <p className="text-sm text-muted">Tu simulacro está en curso. ¡Mucha suerte!</p>
+            <DatosSimulacro escenario={state?.escenario} datos={state?.datos} />
             <button
               onClick={reset}
               className="rounded-lg border border-border px-4 py-2 text-sm hover:border-accent"
@@ -160,5 +162,16 @@ export default function SimulacroPage() {
         </p>
       </div>
     </main>
+  );
+}
+
+function DatosSimulacro({ escenario, datos }: { escenario?: string | null; datos?: string }) {
+  if (!escenario && !datos) return null;
+  return (
+    <div className="rounded-xl border border-border bg-bg/40 p-3 text-left">
+      <p className="text-xs uppercase tracking-wide text-muted mb-1">Datos del simulacro</p>
+      {escenario && <p className="text-sm font-medium">{escenario}</p>}
+      {datos && <p className="text-sm text-zinc-300 whitespace-pre-wrap mt-1">{datos}</p>}
+    </div>
   );
 }
