@@ -55,7 +55,14 @@ magister-simulacros/
   - (`faqs_por_nivel` es una columna **deprecada**, sustituida por `faqs`).
 - **Personalidad** (= "persona IA"; en BD es `SimulacroScenario`): el alumno IA que
   recibe la llamada. Pertenece a un departamento, tiene `dificultad`, `persona`
-  (perfil), `objeciones`, `faqs` propias, `guion` (situación), `producto`.
+  (perfil), `objeciones`, `faqs` propias, `guion` (situación), `producto`, y además:
+  - **`datos_agente`** (texto): la **ficha que ve la asesora** antes/durante la llamada
+    en `/simulacro` (a quién llama, datos tipo CRM). **Solo datos duros, sin pistas**
+    de cómo irá el simulacro. **El nombre de la personalidad/escenario NO se muestra**
+    a la asesora (es interno y delataría el tipo de llamada).
+  - **`intencion`** (texto): intención del alumno (p. ej. *"poco interesado, con prisa"*).
+    Se inyecta como variable dinámica `{{intencion}}` para que la IA actúe en
+    consecuencia (incluido **colgar** ella misma).
   **OJO terminología**: en la UI se llama **"Personalidad"**; en el código/tabla es
   `scenario`/`SimulacroScenario`.
 - **Agente** (= comercial; en BD es `SimulacroComercial`): una **fila por membresía
@@ -85,7 +92,8 @@ magister-simulacros/
   y `departamento` (denormalizados), `scores` (por parámetro), `total_score`,
   `percent_quality`, `feedback_message`, `detailed_report`, `crm_snapshot`
   (incluye la **transcripción** en `crm_snapshot.transcript` / `._simulacro`),
-  `status` (`done`/`failed`/...), `error`.
+  `status` (`done`/`failed`/...), `error`, y **`admin_feedback`** (`"up"`/`"down"`/null):
+  valoración 👍/👎 que pone el admin sobre la evaluación (para mejorar el evaluador).
 - `KbDocument` / `KbChunk` (Vector 1536) — KB (docs/) para el grounding del coach.
 - `SimulacroDepartamento`, `SimulacroScenario`, `SimulacroComercial`,
   `SimulacroEvaluador` — ver §3.
@@ -93,7 +101,8 @@ magister-simulacros/
 **Migraciones (Alembic, `backend/alembic/versions/`):**
 `0001` inicial · `0002` `faqs_por_nivel` (deprecado) · `0003` `escenario`+`departamento`
 en analyses · `0004` `faqs` estructuradas en dpto · `0005` evaluadores +
-`departamento.evaluador_id` · `0006` `producto` String(120)→500.
+`departamento.evaluador_id` · `0006` `producto` String(120)→500 ·
+`0007` `scenario.datos_agente` + `scenario.intencion` + `analysis.admin_feedback`.
 El arranque corre `alembic upgrade head` (ver `backend/start.sh`).
 
 ---
@@ -127,6 +136,7 @@ Routers en `backend/app/api/`, montados con prefijo `/api` en `main.py`.
   - **`GET /stats`** — agregados del dashboard: KPIs, series, **temas más fallados**
     (peores parámetros), por dificultad, y **por agente** (última llamada `ultima_id`,
     nº, nota media, nivel activo, **membresías**, nivel recomendado).
+  - `POST /{id}/feedback` (admin) — fija `admin_feedback` (`up`/`down`/null) 👍/👎.
 - **`/api/retell`** (`retell.py`, **público**, lo llama Retell):
   - `POST /inbound-vars` — variables dinámicas para la llamada entrante (persona,
     guion, dificultad, FAQs del nivel). Resuelve el agente y consume la cola.
@@ -156,7 +166,8 @@ Routers en `backend/app/api/`, montados con prefijo `/api` en `main.py`.
 
 - **Un solo agente Retell** + **variables dinámicas**: el guión se inyecta por llamada
   (no hay un agente por guión). Ver `app/services/retell.py` →
-  `build_dynamic_variables` (mezcla FAQs comunes del nivel + FAQs de la personalidad).
+  `build_dynamic_variables` (mezcla FAQs comunes del nivel + FAQs de la personalidad,
+  e inyecta `{{intencion}}` de la personalidad).
 - **El CRM marca la llamada como siempre** (no usa la API de Retell). Justo antes,
   hace `POST /api/retell/announce {agente_nombre, from_number?}` con `X-CRM-Token`.
   Ver `INTEGRACION_CRM_SIMULACROS.md`. El `agente_nombre` debe coincidir con el
@@ -175,15 +186,24 @@ Nav (dentro de `/dashboard`, requiere login): **Agentes · Configuración · Dev
   → detalle), nº, nota media, recomendado. Filtro por departamento + KPIs. Abajo:
   temas más fallados, nota por dificultad, progreso. **"Ver detalles"** → modal con
   membresías (gestión) + historial; cada llamada abre su detalle (transcripción +
-  feedback + evaluación por parámetro + informe). Borrar agente / borrar simulacro.
+  feedback + evaluación por parámetro + informe + **👍/👎** del admin sobre la
+  evaluación). Borrar agente / borrar simulacro.
 - **`/dashboard/simulacros`** — **Configuración**: selector de departamento;
   por departamento, sus personalidades en **tabla** (ordenable por nombre/dificultad,
-  default dificultad), FAQs, evaluador. Catálogo de **evaluadores** (CRUD + generar IA).
+  default dificultad), FAQs, evaluador (chip en la cabecera). El modal de personalidad
+  incluye **"Datos para el agente"** (`datos_agente`) e **"Intención"** (`intencion`).
+  Catálogo de **evaluadores** (CRUD + generar IA). La **rúbrica del evaluador se edita
+  con un FORMULARIO** (un parámetro = Nombre / Peso / Criterio / Descripción, con
+  añadir/quitar y contador de peso total); ya **no es un textarea JSON**. El `id`
+  técnico se autogenera del nombre (`slugify`) y la `dimension` se fija a
+  `informacion_telefonica`.
 - **`/dashboard/dev`** — simulador del botón "Llamar" del CRM + llamada saliente de prueba.
 - **`/dashboard/log`** — **Logs**: todas las llamadas; borrar por fila (confirmación escrita).
 - **`/dashboard/detail?id=…`** — detalle completo de una llamada.
 - **`/simulacro`** — **panel PÚBLICO sin login**: nombre de seguimiento + "Iniciar
-  simulacro" → cola; muestra el número a llamar tras pulsar.
+  simulacro" → cola; muestra el número a llamar **tras pulsar**, y la ficha
+  **"Datos del simulacro"** (`datos_agente`) durante el turno (45 s) y la llamada.
+  **No muestra el nombre de la personalidad** (es interno).
 - **`/`** — login.
 
 **Notas/escala:** las notas se muestran **sobre 10** con color gradiente rojo→amarillo→
