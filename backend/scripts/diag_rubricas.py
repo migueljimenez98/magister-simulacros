@@ -133,7 +133,23 @@ async def main(target_ids: list[str], purge: bool, clean_analyses: bool) -> None
             rub = f"evaluador='{ev.nombre}' (id={ev.id})" if ev else "PROYECTO POR DEFECTO"
             print(f"  - {d.nombre!r} (id={d.id}) -> {rub}")
 
-        # 4) Limpieza de scores huérfanos en las evaluaciones ya guardadas.
+        # 4) Escaneo READ-ONLY de las evaluaciones: cuáles conservan el parámetro
+        #    en sus `scores` (esto es lo que alimenta el detalle y 'temas más
+        #    fallados'). Siempre se muestra, con o sin flags.
+        arows = (await s.execute(select(QualityAnalysis))).scalars().all()
+        con_orfano = []
+        for a in arows:
+            hit_keys = [k for k in (a.scores or {}) if k in targets]
+            if hit_keys:
+                con_orfano.append((a, hit_keys))
+        print(f"\n[EVALUACIONES] total: {len(arows)} · con parámetro huérfano en scores: {len(con_orfano)}")
+        for a, hit_keys in con_orfano:
+            print(f"  - {a.id} status={a.status} depto={a.departamento!r} agente={a.agente_nombre!r} -> {hit_keys}")
+        if not con_orfano:
+            print("  -> NINGUNA evaluación contiene el parámetro. 'Temas más fallados' saldrá limpio.")
+            print("     Si aún lo ves en el panel, es CACHÉ del navegador: recarga con Ctrl+Shift+R.")
+
+        # 5) Limpieza de scores huérfanos en las evaluaciones ya guardadas.
         if clean_analyses:
             print("\n[LIMPIEZA DE EVALUACIONES]")
             await _clean_analyses(s, targets)
