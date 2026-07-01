@@ -341,9 +341,14 @@ async def redispatch_analysis(
     await session.commit()
     await session.refresh(row)
 
-    from .retell import _run_simulacro_audit  # local import avoids cycle
+    from .retell import _evaluador_override_for, _run_simulacro_audit  # local import avoids cycle
+    # Resolve the SAME evaluador the webhook would use (department's assigned
+    # evaluador, else project default). Without this, redispatch scored with the
+    # project rubric and re-introduced params removed from the department evaluador.
+    evaluador_override = await _evaluador_override_for(session, snap)
     transcript = snap.get("transcript") or (snap.get("_simulacro") or {}).get("transcript") or ""
     background.add_task(
         _run_simulacro_audit, graph, row.id, row.agente_nombre, row.call_date, transcript, snap,
+        evaluador_override,
     )
     return row
