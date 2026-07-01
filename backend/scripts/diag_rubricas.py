@@ -12,6 +12,14 @@ Uso:
     # Diagnóstico + eliminar esos ids de TODAS las rúbricas (proyecto + catálogo):
     python -m scripts.diag_rubricas --purge cambios_novedades tema_practico_lomloe
 
+    # Limpiar esos ids de las EVALUACIONES ya guardadas (analysis.scores) y
+    # recalcular la nota. Esto es lo que quita el parámetro del detalle y de
+    # "temas más fallados" sin depender de reevaluar:
+    python -m scripts.diag_rubricas --clean-analyses cambios_novedades tema_practico_lomloe
+
+    # Ambas cosas a la vez:
+    python -m scripts.diag_rubricas --purge --clean-analyses
+
 Si no se pasan ids, usa por defecto: cambios_novedades, tema_practico_lomloe.
 """
 from __future__ import annotations
@@ -24,6 +32,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.db import async_session
 from app.core.models import (
+    QualityAnalysis,
     QualityProject,
     SimulacroDepartamento,
     SimulacroEvaluador,
@@ -40,10 +49,46 @@ def _hits(rules: list[dict] | None, targets: set[str]) -> list[str]:
     return [rid for rid in _rule_ids(rules) if rid in targets]
 
 
-async def main(target_ids: list[str], purge: bool) -> None:
+async def _clean_analyses(s, targets: set[str]) -> None:
+    """Elimina claves huérfanas de `scores` en TODAS las evaluaciones y recalcula
+    total/ideal/percent con los parámetros restantes. Necesario porque
+    `analysis.scores` conserva parámetros de rúbricas antiguas hasta que se
+    reevalúa con éxito; mientras, siguen saliendo en el detalle y en
+    'temas más fallados'."""
+    rows = (await s.execute(select(QualityAnalysis))).scalars().all()
+    changed = 0
+    for a in rows:
+        scores = a.scores or {}
+        hit_keys = [k for k in scores if k in targets]
+        if not hit_keys:
+            continue
+        for k in hit_keys:
+            del scores[k]
+        # Recalcula la nota global con los parámetros aplicados que quedan.
+        applied = [v for v in scores.values() if isinstance(v, dict) and v.get("applied")]
+        total = sum(float(v.get("score") or 0) for v in applied)
+        ideal = sum(float(v.get("max") or 0) for v in applied)
+        a.scores = dict(scores)  # reasigna para marcar el JSONB como modificado
+        a.total_score = total if applied else None
+        a.ideal_score = ideal if applied else None
+        a.percent_quality = round(100.0 * total / ideal, 2) if ideal > 0 else None
+        changed += 1
+        print(f"    limpiada evaluación {a.id} (quitados {hit_keys}) -> nota {a.percent_quality}")
+    print(f"  [ANALYSES] filas con claves huérfanas limpiadas: {changed}/{len(rows)}")
+
+
+async def main(target_ids: list[str], purge: bool, clean_analyses: bool) -> None:
     targets = set(target_ids)
+    modo = "solo diagnóstico"
+    if purge or clean_analyses:
+        parts = []
+        if purge:
+            parts.append("PURGA rúbricas")
+        if clean_analyses:
+            parts.append("LIMPIA evaluaciones")
+        modo = " + ".join(parts)
     print(f"\n=== Buscando parámetros: {sorted(targets)} ===")
-    print(f"=== Modo: {'PURGA (se eliminarán)' if purge else 'solo diagnóstico'} ===\n")
+    print(f"=== Modo: {modo} ===\n")
 
     async with async_session() as s:
         # 1) Rúbrica por defecto del proyecto
@@ -88,15 +133,25 @@ async def main(target_ids: list[str], purge: bool) -> None:
             rub = f"evaluador='{ev.nombre}' (id={ev.id})" if ev else "PROYECTO POR DEFECTO"
             print(f"  - {d.nombre!r} (id={d.id}) -> {rub}")
 
-        if purge:
+        # 4) Limpieza de scores huérfanos en las evaluaciones ya guardadas.
+        if clean_analyses:
+            print("\n[LIMPIEZA DE EVALUACIONES]")
+            await _clean_analyses(s, targets)
+
+        if purge or clean_analyses:
             await s.commit()
-            print("\n*** Cambios GUARDADOS. Reevalúa los simulacros para aplicar. ***")
+            print("\n*** Cambios GUARDADOS. ***")
         else:
-            print("\n(Solo diagnóstico: no se ha modificado nada. Añade --purge para limpiar.)")
+            print(
+                "\n(Solo diagnóstico: no se ha modificado nada. "
+                "Añade --purge para limpiar rúbricas y/o --clean-analyses para "
+                "limpiar los scores huérfanos de las evaluaciones guardadas.)"
+            )
 
 
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:]]
     purge = "--purge" in args
+    clean_analyses = "--clean-analyses" in args
     ids = [a for a in args if not a.startswith("--")] or DEFAULT_IDS
-    asyncio.run(main(ids, purge))
+    asyncio.run(main(ids, purge, clean_analyses))
