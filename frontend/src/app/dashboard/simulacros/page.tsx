@@ -961,60 +961,86 @@ function RubricEditor({
       { id: "", name: "", weight: 10, dimension: "informacion_telefonica", criteria: "", description: "" },
     ]);
 
+  const fieldLabel = "block text-xs font-medium text-zinc-300 mb-1";
+  const fieldHelp = "text-[11px] text-muted mb-1 leading-snug";
+  const fieldInput = "w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm";
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <span className="text-sm text-muted">Rúbrica — parámetros que se puntúan</span>
+        <span className="text-sm font-medium">Rúbrica — parámetros que se puntúan</span>
         <span className={`text-xs tabular-nums ${total === 100 ? "text-emerald-400" : "text-amber-400"}`}>
           Peso total: {total}
         </span>
       </div>
+      <p className="text-xs text-muted leading-snug">
+        Cada tarjeta es un <strong>parámetro</strong> que el evaluador puntúa en cada llamada.
+        Rellena qué evalúa y con qué peso; los campos van etiquetados.
+      </p>
 
       {rules.length === 0 && (
         <p className="text-xs text-muted italic">Sin parámetros todavía. Añade el primero abajo.</p>
       )}
 
       {rules.map((r, i) => (
-        <div key={i} className="rounded-lg border border-border bg-bg/40 p-3 space-y-2">
-          <div className="flex gap-2 items-start">
-            <input
-              value={String(r.name ?? "")}
-              onChange={(e) => update(i, "name", e.target.value)}
-              placeholder="Nombre del parámetro (ej. Cierre y próximo paso)"
-              className="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-sm"
-            />
-            <div className="flex items-center gap-1">
+        <div key={i} className="rounded-lg border border-border bg-bg/40 p-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted">
+              Parámetro {i + 1}{String(r.name ?? "").trim() ? ` · ${String(r.name).trim()}` : ""}
+            </span>
+            <button
+              onClick={() => removeRow(i)}
+              className="text-xs text-rose-400 hover:text-rose-300"
+              title="Quitar este parámetro de la rúbrica"
+            >
+              ✕ Quitar
+            </button>
+          </div>
+
+          <div className="flex gap-3 items-end">
+            <div className="flex-1">
+              <label className={fieldLabel}>Nombre del parámetro</label>
+              <input
+                value={String(r.name ?? "")}
+                onChange={(e) => update(i, "name", e.target.value)}
+                placeholder="Ej. Cierre y próximo paso"
+                className={fieldInput}
+              />
+            </div>
+            <div className="w-24">
+              <label className={fieldLabel}>Peso</label>
               <input
                 type="number"
                 min={0}
                 value={String(r.weight ?? "")}
                 onChange={(e) => update(i, "weight", e.target.value === "" ? "" : Number(e.target.value))}
-                className="w-16 bg-bg border border-border rounded-lg px-2 py-2 text-sm tabular-nums text-right"
-                aria-label="Peso"
+                className={`${fieldInput} tabular-nums text-right`}
               />
-              <span className="text-xs text-muted">peso</span>
             </div>
-            <button
-              onClick={() => removeRow(i)}
-              className="text-rose-400 hover:text-rose-300 px-2 py-2 text-sm"
-              title="Quitar parámetro"
-            >
-              ✕
-            </button>
           </div>
-          <input
-            value={String(r.criteria ?? "")}
-            onChange={(e) => update(i, "criteria", e.target.value)}
-            placeholder="Criterio breve (qué debe cumplir para puntuar)"
-            className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm"
-          />
-          <textarea
-            value={String(r.description ?? "")}
-            onChange={(e) => update(i, "description", e.target.value)}
-            rows={2}
-            placeholder="Descripción (detalle para el auditor: qué evaluar y cómo)"
-            className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm resize-y"
-          />
+
+          <div>
+            <label className={fieldLabel}>Criterio</label>
+            <p className={fieldHelp}>En una frase: qué tiene que hacer la asesora para puntuar en este parámetro.</p>
+            <input
+              value={String(r.criteria ?? "")}
+              onChange={(e) => update(i, "criteria", e.target.value)}
+              placeholder="Ej. Propone un siguiente paso concreto y lo confirma"
+              className={fieldInput}
+            />
+          </div>
+
+          <div>
+            <label className={fieldLabel}>Descripción / instrucciones para el evaluador</label>
+            <p className={fieldHelp}>Detalle para la IA que puntúa: qué mirar, qué cuenta como bien/mal, ejemplos.</p>
+            <textarea
+              value={String(r.description ?? "")}
+              onChange={(e) => update(i, "description", e.target.value)}
+              rows={2}
+              placeholder="Ej. Debe acordar fecha/canal del siguiente contacto. Sin siguiente paso claro = 0."
+              className={`${fieldInput} resize-y`}
+            />
+          </div>
         </div>
       ))}
 
@@ -1025,7 +1051,7 @@ function RubricEditor({
         + Añadir parámetro
       </button>
       <p className="text-xs text-muted">
-        El peso es la importancia relativa de cada parámetro. No tiene que sumar 100 exacto
+        El <strong>peso</strong> es la importancia relativa de cada parámetro. No tiene que sumar 100 exacto
         (la nota se normaliza), pero 100 facilita leerla.
       </p>
     </div>
