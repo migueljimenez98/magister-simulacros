@@ -317,6 +317,21 @@ async def _run_simulacro_audit(
 ) -> None:
     """Invoke the audit graph for a simulacro. The persist node writes the
     result back into the row keyed by analysis_id."""
+    # The graph runs with a checkpointer keyed by thread_id=analysis_id, and the
+    # state's `scores` field is a MERGE reducer. On a re-evaluation LangGraph
+    # resumes from the previous checkpoint, so old params would be merged back in
+    # and survive forever — even ones removed from the rubric. Wipe this thread's
+    # checkpoints first so every (re-)evaluation starts from a clean state and
+    # persists ONLY the current rubric's parameters.
+    try:
+        from ..core.db import get_checkpointer  # local import avoids cycle
+
+        adelete = getattr(get_checkpointer(), "adelete_thread", None)
+        if adelete is not None:
+            await adelete(analysis_id)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("checkpoint_reset_failed", analysis_id=analysis_id, error=str(exc)[:200])
+
     try:
         await graph.ainvoke(
             {
