@@ -76,7 +76,8 @@ export default function LogLlamadasPage() {
                 <th className="px-4 py-2 font-medium">Nota</th>
                 <th className="px-4 py-2 font-medium">Feedback</th>
                 <th className="px-4 py-2 font-medium">Estado</th>
-                <th className="px-4 py-2 font-medium">Fecha</th>
+                <th className="px-4 py-2 font-medium">Fecha llamada</th>
+                <th className="px-4 py-2 font-medium">Evaluado</th>
                 <th className="px-4 py-2"></th>
               </tr>
             </thead>
@@ -101,6 +102,9 @@ export default function LogLlamadasPage() {
                   </td>
                   <td className="px-4 py-2 text-muted whitespace-nowrap">
                     {new Date(r.created_at).toLocaleString("es-ES")}
+                  </td>
+                  <td className="px-4 py-2 text-muted whitespace-nowrap">
+                    {r.status === "done" ? new Date(r.updated_at).toLocaleString("es-ES") : "—"}
                   </td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
                     <button
