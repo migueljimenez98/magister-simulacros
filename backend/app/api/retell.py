@@ -277,15 +277,24 @@ async def _common_faqs_for(
     return _faqs_to_text(dept.faqs, nivel)
 
 
-async def _evaluador_override_for(session: SessionDep, snapshot: dict[str, Any]) -> dict[str, Any]:
+async def _evaluador_override_for(
+    session: SessionDep, snapshot: dict[str, Any], dept_name: str | None = None,
+) -> dict[str, Any]:
     """Resolve the evaluador assigned to the call's department (via the scenario)
     and return its {rules_table, prompts} override. Empty dict → use the project
-    default."""
+    default.
+
+    `dept_name` is an optional fallback: older snapshots may lack
+    `scenario.department_id`. When it's missing we resolve the department by its
+    (denormalized) name so a re-evaluation still uses the department's evaluador
+    instead of silently dropping back to the project default rubric."""
     scenario = (snapshot.get("_simulacro") or {}).get("scenario") or {}
     dept_id = scenario.get("department_id")
-    if not dept_id:
-        return {}
-    dept = await session.get(SimulacroDepartamento, dept_id)
+    dept = await session.get(SimulacroDepartamento, dept_id) if dept_id else None
+    if dept is None and dept_name:
+        dept = (await session.execute(
+            select(SimulacroDepartamento).where(SimulacroDepartamento.nombre == dept_name)
+        )).scalars().first()
     if not dept or not dept.evaluador_id:
         return {}
     ev = await session.get(SimulacroEvaluador, dept.evaluador_id)
