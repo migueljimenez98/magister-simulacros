@@ -40,6 +40,15 @@ export default function LogLlamadasPage() {
       setDel(null);
     },
   });
+  const reevaluar = useMutation({
+    mutationFn: (id: string) => api.analyses.redispatch(id),
+    onSuccess: (_d, id) => {
+      // Marca la fila como "en cola" al instante; el refetch (4s) traerá el resultado.
+      qc.setQueryData<AnalysisListPage>(["analyses"], (old) =>
+        old ? { ...old, items: old.items.map((i) => (i.id === id ? { ...i, status: "pending" } : i)) } : old);
+      qc.invalidateQueries({ queryKey: ["analyses"] });
+    },
+  });
 
   const items = data?.items ?? [];
 
@@ -93,7 +102,15 @@ export default function LogLlamadasPage() {
                   <td className="px-4 py-2 text-muted whitespace-nowrap">
                     {new Date(r.created_at).toLocaleString("es-ES")}
                   </td>
-                  <td className="px-4 py-2 text-right">
+                  <td className="px-4 py-2 text-right whitespace-nowrap">
+                    <button
+                      onClick={() => reevaluar.mutate(r.id)}
+                      disabled={reevaluar.isPending || !["done", "failed"].includes(r.status)}
+                      title="Volver a evaluar desde la transcripción guardada"
+                      className="text-accent hover:text-white disabled:opacity-40 disabled:cursor-not-allowed mr-3"
+                    >
+                      {reevaluar.isPending && reevaluar.variables === r.id ? "…" : "Reevaluar"}
+                    </button>
                     <button onClick={() => setDel({ id: r.id, nombre: r.agente_nombre })} className="text-rose-400 hover:text-rose-300">Borrar</button>
                   </td>
                 </tr>
