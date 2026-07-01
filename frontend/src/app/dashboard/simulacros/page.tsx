@@ -885,7 +885,7 @@ function EvaluadorModal({
             description: String(r.description ?? "").trim(),
           };
         })
-        .filter((r): r is Record<string, unknown> => r !== null);
+        .filter((r): r is NonNullable<typeof r> => r !== null);
       if (!cleaned.length) throw new Error("Añade al menos un parámetro a la rúbrica.");
       const body: EvaluadorInput = {
         nombre: nombre.trim(), auditor_prompt: auditor, feedback_prompt: feedback,
