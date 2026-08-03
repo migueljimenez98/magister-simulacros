@@ -578,6 +578,44 @@ def _slice_primary_for_tier(payload: dict[str, Any], tier: str) -> str:
     return ""
 
 
+def _simulacro_brief_block(payload: dict[str, Any]) -> str:
+    """Ficha que la asesora tenía delante en un simulacro + intención con la
+    que se programó al alumno IA. Vacío si no es un simulacro o no hay ficha.
+
+    Sin esto, el moderador aprobaba gaps del tipo "no preguntó el nombre" y el
+    redactor escribía mejoras pidiendo datos que YA le habíamos dado."""
+    slices = payload.get("slices") or {}
+    ctx: dict[str, Any] = {}
+    for k in ("informacion_telefonica", "llamadas"):
+        c = (slices.get(k) or {}).get("context") or {}
+        if c.get("es_simulacro"):
+            ctx = c
+            break
+    if not ctx:
+        return ""
+    datos = str(ctx.get("datos_conocidos_asesora") or "").strip()
+    intencion = str(ctx.get("intencion_alumno") or "").strip()
+    if not datos and not intencion:
+        return ""
+    lines = [
+        "SIMULACRO — LO QUE LA ASESORA YA SABÍA ANTES DE LLAMAR",
+        "",
+        "Antes de la llamada recibió esta ficha (equivale a lo que en real vería",
+        "en el CRM). NO es un fallo que no pregunte lo que ya está aquí; sí lo es",
+        "que lo repregunte o que lo contradiga. Rechaza / no redactes ningún gap",
+        "que consista en 'debería haber preguntado' un dato de esta ficha.",
+        "",
+        f"FICHA: {datos[:1500] or '(vacía — no sabía nada del alumno)'}",
+    ]
+    if intencion:
+        lines += [
+            "",
+            "INTENCIÓN PROGRAMADA DEL ALUMNO IA (escenario, no consecuencia de lo",
+            f"que hizo la asesora — no la culpes por ello): {intencion[:600]}",
+        ]
+    return "\n".join(lines)
+
+
 async def _validate_gap(
     payload: dict[str, Any],
     tier: str,
@@ -654,8 +692,18 @@ async def _validate_gap(
     if ev:
         cita = str(ev[0])[:500]
 
+    brief = _simulacro_brief_block(payload)
+    brief_section = (
+        "\n══════════════════════════════════════════════════════════════════════\n"
+        f"{brief}\n"
+        "══════════════════════════════════════════════════════════════════════\n"
+        if brief
+        else ""
+    )
+
     user_prompt = f"""\
 TIER A VALIDAR: {tier}
+{brief_section}
 REGLA EVALUADA:
 - id: {rule.get('id') or rule_id}
 - nombre: {rule.get('name') or '(sin nombre)'}
@@ -1056,6 +1104,8 @@ CONTEXTO DE ESTA AUDITORÍA
 - Agente: {payload.get('agente') or 'la asesora'}
 - Total global: {payload.get('total_score')}/{payload.get('ideal_score')} ({payload.get('percent_quality')}%)
 - **Caso detectado: {_detect_caso(payload.get('scores') or {})}** (A = SÍ hablamos, B = NO hablamos, ? = no detectable)
+
+{_simulacro_brief_block(payload)}
 
 ESTADO POR CANAL (applied=True → hay material para auditar; applied=False → la vertical no se evalúa porque NO HAY datos para ese canal)
 - gestion (atención humana + protocolo):  applied={ _channel_state(payload.get('scores_by_dimension') or {}).get('gestion') }

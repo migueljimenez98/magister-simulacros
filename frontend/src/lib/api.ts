@@ -138,6 +138,14 @@ export interface AnalysisListPage {
   offset: number;
 }
 
+export interface ReasignarResult {
+  ok: boolean;
+  changed: boolean;
+  analysis_id?: string;
+  de?: string;
+  agente_nombre: string;
+}
+
 export interface AnalysisListParams {
   project_id?: string;
   agente?: string;
@@ -173,6 +181,8 @@ export const api = {
     delete: (id: string) => request<void>(`/api/analyses/${id}`, { method: "DELETE" }),
     redispatch: (id: string) =>
       request<Analysis>(`/api/analyses/${id}/redispatch`, { method: "POST" }),
+    reasignar: (id: string, agente_nombre: string) =>
+      request<ReasignarResult>(`/api/analyses/${id}/reasignar`, { method: "POST", json: { agente_nombre } }),
     stats: (params?: { departamento?: string; agente?: string; desde?: string; hasta?: string }) => {
       const entries: [string, string][] = [];
       for (const [k, v] of Object.entries(params || {})) {
@@ -299,6 +309,39 @@ export interface LevelResult {
   rule_id?: string;
 }
 
+// Historial de niveles: cada movimiento con las llamadas que costó.
+export interface NivelEvento {
+  id: string;
+  fecha: string | null;
+  agente_nombre: string;
+  comercial_id: string | null;
+  department_id: string | null;
+  departamento: string | null;
+  from_nivel: string | null;
+  to_nivel: string;
+  direction: "promote" | "demote" | "alta" | "lateral";
+  origen: "auto" | "manual" | "alta";
+  rule_id: string | null;
+  motivo: string;
+  llamadas_en_nivel: number;
+  llamadas_totales: number;
+  avg_percent_en_nivel: number | null;
+  actor: string;
+}
+export interface NivelActual {
+  nivel: string | null;
+  departamento: string | null;
+  desde: string | null;
+  llamadas_en_nivel: number;
+  llamadas_totales: number;
+  avg_percent_en_nivel: number | null;
+}
+export interface NivelHistorial {
+  agente: string;
+  eventos: NivelEvento[];
+  actual: NivelActual | null;
+}
+
 export interface AnnouncePending {
   agente: string;
   from_number: string;
@@ -362,6 +405,9 @@ export const simulacrosApi = {
     request<Evaluador>(`/api/simulacros/evaluadores/catalogo/${encodeURIComponent(id)}`, { method: "PATCH", json: data }),
   deleteEvaluador: (id: string) =>
     request<void>(`/api/simulacros/evaluadores/catalogo/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  historialNiveles: (nombre: string) =>
+    request<NivelHistorial>(`/api/simulacros/agentes/${encodeURIComponent(nombre)}/niveles`),
 
   evaluateLevel: (comercialId: string) =>
     request<LevelResult>(`/api/simulacros/comerciales/${encodeURIComponent(comercialId)}/evaluate-level`, { method: "POST" }),

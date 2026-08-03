@@ -42,6 +42,8 @@ def _scenario_header(scenario: dict, comercial: str) -> str:
     persona = (scenario.get("persona") or "").strip()
     objeciones = (scenario.get("objeciones") or "").strip()
     producto = (scenario.get("producto") or "").strip()
+    datos_agente = (scenario.get("datos_agente") or "").strip()
+    intencion = (scenario.get("intencion") or "").strip()
     lines = [
         "[SIMULACRO DE FORMACIÓN — esto NO es una llamada real con un alumno. "
         "La asesora practica contra un 'alumno' interpretado por una IA de voz. "
@@ -54,6 +56,19 @@ def _scenario_header(scenario: dict, comercial: str) -> str:
         lines.append(f"[PERFIL DEL ALUMNO SIMULADO: {persona[:600]}]")
     if objeciones:
         lines.append(f"[OBJECIONES QUE EL ALUMNO DEBÍA PLANTEAR: {objeciones[:600]}]")
+    # La ficha que la asesora tenía DELANTE al llamar. Sin esto el auditor
+    # penalizaba "no preguntó el nombre / la oposición" cuando esos datos ya
+    # se los habíamos dado — el auditor debe exigir solo lo que NO sabía.
+    if datos_agente:
+        lines.append(
+            f"[DATOS QUE LA ASESORA YA TENÍA ANTES DE LLAMAR (ficha entregada): "
+            f"{datos_agente[:1200]}]"
+        )
+    if intencion:
+        lines.append(
+            f"[INTENCIÓN PROGRAMADA DEL ALUMNO SIMULADO (consigna de la IA, no "
+            f"conducta de la asesora): {intencion[:600]}]"
+        )
     lines.append(f"[ASESORA EVALUADA: {comercial or '(desconocida)'}]")
     return "\n".join(lines)
 
@@ -92,6 +107,10 @@ async def run(state: AuditState) -> dict:
             "dificultad": scenario.get("dificultad"),
             "producto": scenario.get("producto"),
             "asesora_evaluada": comercial,
+            # Lo que la asesora YA SABÍA al descolgar. El auditor y el coach lo
+            # leen para no exigirle que pregunte datos que ya le dimos.
+            "datos_conocidos_asesora": (scenario.get("datos_agente") or "").strip(),
+            "intencion_alumno": (scenario.get("intencion") or "").strip(),
         },
         "registros": [],
     }

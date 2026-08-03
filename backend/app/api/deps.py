@@ -49,6 +49,16 @@ async def current_user(
 CurrentUser = Annotated[dict, Depends(current_user)]
 
 
+async def actor_label(session: AsyncSession, user: dict[str, Any]) -> str:
+    """Human-readable identity for audit trails (level changes, reassignments).
+    Falls back to the raw user id if the row is gone."""
+    uid = str(user.get("sub") or "")
+    if not uid:
+        return ""
+    row = await session.get(User, uid)
+    return (row.email if row else uid)[:255]
+
+
 def require_role(required: str):
     """Return a FastAPI dependency that enforces a minimum role.
 

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, type AnalysisListPage } from "@/lib/api";
+import { api, simulacrosApi, type AnalysisListPage } from "@/lib/api";
 import { nota10, notaHsl } from "@/lib/score";
 import { ConfirmDelete } from "@/components/confirm-delete";
 
@@ -21,6 +21,7 @@ const STATUS_COLOR: Record<string, string> = {
 export default function LogLlamadasPage() {
   const qc = useQueryClient();
   const [del, setDel] = useState<{ id: string; nombre: string } | null>(null);
+  const [reasignar, setReasignar] = useState<{ id: string; nombre: string } | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: ["analyses"],
     queryFn: () => api.analyses.list({ limit: 200 }),
@@ -115,6 +116,13 @@ export default function LogLlamadasPage() {
                     >
                       {reevaluar.isPending && reevaluar.variables === r.id ? "…" : "Reevaluar"}
                     </button>
+                    <button
+                      onClick={() => setReasignar({ id: r.id, nombre: r.agente_nombre })}
+                      title="Asignar esta llamada a otro agente"
+                      className="text-accent hover:text-white mr-3"
+                    >
+                      Reasignar
+                    </button>
                     <button onClick={() => setDel({ id: r.id, nombre: r.agente_nombre })} className="text-rose-400 hover:text-rose-300">Borrar</button>
                   </td>
                 </tr>
@@ -133,6 +141,83 @@ export default function LogLlamadasPage() {
           onClose={() => setDel(null)}
         />
       )}
+      {reasignar && (
+        <ReasignarModal
+          id={reasignar.id}
+          actual={reasignar.nombre}
+          onClose={() => setReasignar(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Mueve una llamada al agente correcto cuando la atribución automática
+// (caller ID / anuncio del CRM) la dejó en la persona equivocada.
+function ReasignarModal({ id, actual, onClose }: { id: string; actual: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [nombre, setNombre] = useState("");
+  const [err, setErr] = useState("");
+  const { data: comerciales } = useQuery({
+    queryKey: ["sim-comerciales"],
+    queryFn: simulacrosApi.listComerciales,
+  });
+  // Un agente puede tener ficha en varios departamentos: la lista va por NOMBRE.
+  const nombres = Array.from(new Set((comerciales ?? []).map((c) => c.nombre)))
+    .filter((n) => n && n !== actual)
+    .sort((a, b) => a.localeCompare(b, "es"));
+
+  const guardar = useMutation({
+    mutationFn: () => {
+      const n = nombre.trim();
+      if (!n) throw new Error("Elige un agente");
+      return api.analyses.reasignar(id, n);
+    },
+    onSuccess: () => {
+      // La nota cambia de dueño: refresca log, stats e historiales.
+      qc.invalidateQueries({ queryKey: ["analyses"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+      qc.invalidateQueries({ queryKey: ["agente-historial"] });
+      qc.invalidateQueries({ queryKey: ["agente-niveles"] });
+      onClose();
+    },
+    onError: (e: unknown) => setErr(e instanceof Error ? e.message : "No se pudo reasignar"),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 overflow-auto" onClick={onClose}>
+      <div className="bg-card border border-border rounded-2xl p-5 w-full max-w-md my-16" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-semibold mb-1">Reasignar simulacro</h3>
+        <p className="text-sm text-muted mb-4">
+          Ahora está asignado a <strong className="text-white">{actual}</strong>. Al cambiarlo, la nota
+          deja de contar para esa persona y pasa a contar para la nueva (se recalculan sus niveles).
+        </p>
+        <label className="text-sm space-y-1 block">
+          <span className="text-muted">Nuevo agente</span>
+          <select
+            value={nombre}
+            onChange={(e) => { setNombre(e.target.value); setErr(""); }}
+            className="w-full bg-bg border border-border rounded-lg px-3 py-2"
+          >
+            <option value="">— elige un agente —</option>
+            {nombres.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </label>
+        {!nombres.length && (
+          <p className="text-xs text-muted pt-2">No hay otros agentes dados de alta.</p>
+        )}
+        {err && <p className="text-sm text-rose-400 pt-2">{err}</p>}
+        <div className="flex justify-end gap-2 pt-4">
+          <button onClick={onClose} className="text-sm rounded-lg border border-border px-3 py-2 hover:border-accent">Cancelar</button>
+          <button
+            onClick={() => guardar.mutate()}
+            disabled={guardar.isPending || !nombre.trim()}
+            className="text-sm rounded-lg bg-accent text-black font-medium px-3 py-2 hover:opacity-90 disabled:opacity-50"
+          >
+            {guardar.isPending ? "Reasignando…" : "Reasignar"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

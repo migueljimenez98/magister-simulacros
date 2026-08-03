@@ -44,7 +44,7 @@ from ..services import faq_import
 from ..services import persona_gen
 from ..services import leveling
 from ..services import retell as retell_svc
-from .deps import SessionDep, current_user, get_audit_graph, require_role
+from .deps import CurrentUser, SessionDep, actor_label, current_user, get_audit_graph, require_role
 
 log = structlog.get_logger()
 
@@ -844,12 +844,21 @@ async def _enforce_single_active(session: SessionDep, nombre: str, keep_id: str)
     "/comerciales", status_code=201,
     dependencies=[Depends(require_role("admin"))],
 )
-async def create_comercial(data: ComercialIn, session: SessionDep) -> dict[str, Any]:
+async def create_comercial(data: ComercialIn, session: SessionDep, user: CurrentUser) -> dict[str, Any]:
     c = SimulacroComercial(**data.model_dump())
     session.add(c)
     await session.flush()
     if c.activo:
         await _enforce_single_active(session, c.nombre, c.id)
+    # Alta: marca el punto de partida del historial de niveles. Sin este
+    # evento no se puede saber cuántas llamadas costó la PRIMERA subida.
+    if c.nivel:
+        await leveling.record_nivel_change(
+            session, c,
+            from_nivel=None, to_nivel=c.nivel,
+            origen="alta", motivo="alta del agente en el departamento",
+            actor=await actor_label(session, user),
+        )
     await session.commit()
     await session.refresh(c)
     return _comercial_to_dict(c)
@@ -859,14 +868,26 @@ async def create_comercial(data: ComercialIn, session: SessionDep) -> dict[str, 
     "/comerciales/{comercial_id}",
     dependencies=[Depends(require_role("admin"))],
 )
-async def update_comercial(comercial_id: str, data: ComercialIn, session: SessionDep) -> dict[str, Any]:
+async def update_comercial(
+    comercial_id: str, data: ComercialIn, session: SessionDep, user: CurrentUser
+) -> dict[str, Any]:
     c = await session.get(SimulacroComercial, comercial_id)
     if not c:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Comercial no encontrado")
+    nivel_previo = c.nivel
     for k, v in data.model_dump().items():
         setattr(c, k, v)
     if c.activo:
         await _enforce_single_active(session, c.nombre, c.id)
+    # Cambio manual de nivel (el coordinador lo mueve desde el panel): queda
+    # registrado igual que los automáticos, con las llamadas que llevaba.
+    if c.nivel and c.nivel != nivel_previo:
+        await leveling.record_nivel_change(
+            session, c,
+            from_nivel=nivel_previo, to_nivel=c.nivel,
+            origen="manual", motivo="cambio manual desde el panel",
+            actor=await actor_label(session, user),
+        )
     await session.commit()
     await session.refresh(c)
     return _comercial_to_dict(c)
@@ -998,6 +1019,41 @@ async def cola_status(ticket: str) -> dict[str, Any]:
 async def cola_info() -> dict[str, Any]:
     """Public: the phone number to call for the self-service panel."""
     return {"numero": settings.retell_from_number or ""}
+
+
+@simulacros_router.get("/agentes/{nombre}/niveles")
+async def historial_niveles(nombre: str, session: SessionDep) -> dict[str, Any]:
+    """Historial de nivel del agente: cada cambio (alta, subida, bajada), quién
+    lo hizo y CUÁNTAS llamadas hicieron falta para llegar a él.
+
+    `llamadas_en_nivel` de cada evento = simulacros evaluados desde el evento
+    anterior; es decir, lo que costó ese movimiento. El bloque `actual` cierra
+    el historial con las llamadas acumuladas en el nivel de HOY (todavía sin
+    cambio), para que el progreso en curso también sea visible."""
+    eventos = await leveling.historial(session, nombre)
+    membs = (await session.execute(
+        select(SimulacroComercial).where(SimulacroComercial.nombre == nombre)
+    )).scalars().all()
+    activa = _pick_active(list(membs))
+    actual: dict[str, Any] | None = None
+    if activa is not None:
+        ultimo = next(
+            (e for e in eventos if e["department_id"] == activa.department_id), None
+        )
+        desde = None
+        if ultimo and ultimo["fecha"]:
+            desde = datetime.fromisoformat(ultimo["fecha"])
+        dept = (
+            await session.get(SimulacroDepartamento, activa.department_id)
+            if activa.department_id else None
+        )
+        actual = {
+            "nivel": activa.nivel,
+            "departamento": dept.nombre if dept else None,
+            "desde": ultimo["fecha"] if ultimo else None,
+            **(await leveling.progreso_en_nivel(session, nombre, desde)),
+        }
+    return {"agente": nombre, "eventos": eventos, "actual": actual}
 
 
 @simulacros_router.post("/comerciales/{comercial_id}/evaluate-level")

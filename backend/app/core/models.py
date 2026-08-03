@@ -265,6 +265,50 @@ class SimulacroComercial(Base):
     )
 
 
+class SimulacroNivelEvento(Base):
+    """Historial de nivel de un agente — una fila por cambio.
+
+    Responde a "¿cuántas llamadas le hicieron falta para subir?": cada evento
+    guarda los simulacros completados DESDE el evento anterior
+    (`llamadas_en_nivel`) y su nota media, además de quién/qué lo movió
+    (regla de escalado automática, cambio manual del coordinador, o el alta).
+    """
+    __tablename__ = "simulacro_nivel_eventos"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: _id("nev"))
+    comercial_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("simulacro_comerciales.id", ondelete="SET NULL")
+    )
+    # Denormalizado: el histórico sobrevive al borrado de la ficha.
+    agente_nombre: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    department_id: Mapped[str | None] = mapped_column(String(64))
+    departamento: Mapped[str | None] = mapped_column(String(120))
+
+    from_nivel: Mapped[str | None] = mapped_column(String(32))
+    to_nivel: Mapped[str] = mapped_column(String(32), nullable=False)
+    # promote | demote | alta | lateral
+    direction: Mapped[str] = mapped_column(String(16), nullable=False, default="promote")
+    # auto (motor de escalado) | manual (coordinador) | alta
+    origen: Mapped[str] = mapped_column(String(16), nullable=False, default="auto")
+    rule_id: Mapped[str | None] = mapped_column(String(64))
+    motivo: Mapped[str | None] = mapped_column(Text)
+
+    # Progreso real: simulacros completados mientras estuvo en `from_nivel`.
+    llamadas_en_nivel: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    llamadas_totales: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    avg_percent_en_nivel: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    # Email del admin que lo movió a mano (vacío en cambios automáticos).
+    actor: Mapped[str | None] = mapped_column(String(255))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_nivel_evento_agente_created", "agente_nombre", "created_at"),
+    )
+
+
 class SimulacroEvaluador(Base):
     """Reusable scoring config (auditor/coach/composer prompts + rubric). Created
     independently and assigned to a departamento via `evaluador_id`. Defines how

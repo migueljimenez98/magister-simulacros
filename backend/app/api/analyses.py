@@ -1,7 +1,7 @@
 """Analyses (simulacros) API — list, detail, delete, re-run."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import structlog
@@ -11,7 +11,8 @@ from sqlalchemy import desc, func, select
 
 from ..core.config import settings
 from ..core.models import QualityAnalysis, QualityProject, SimulacroComercial, SimulacroDepartamento
-from .deps import SessionDep, current_user, get_audit_graph, require_role
+from ..services import leveling
+from .deps import CurrentUser, SessionDep, actor_label, current_user, get_audit_graph, require_role
 
 _NIVEL_ORDER = ["facil", "medio", "dificil"]
 
@@ -308,6 +309,67 @@ async def set_feedback(analysis_id: str, data: FeedbackIn, session: SessionDep) 
     row.admin_feedback = v if v in ("up", "down") else None
     await session.commit()
     return {"ok": True, "admin_feedback": row.admin_feedback}
+
+
+class ReasignarIn(BaseModel):
+    agente_nombre: str = Field(..., min_length=1, max_length=200)
+
+
+@router.post("/{analysis_id}/reasignar", dependencies=[Depends(require_role("admin"))])
+async def reasignar_agente(
+    analysis_id: str, data: ReasignarIn, session: SessionDep, user: CurrentUser
+) -> dict[str, Any]:
+    """Reasigna un simulacro a otro agente.
+
+    La atribución automática (caller ID / anuncio del CRM) falla a veces y la
+    llamada aterriza en la persona equivocada. Esto la mueve, deja constancia
+    de quién y cuándo en `crm_snapshot._reasignaciones`, y vuelve a evaluar el
+    nivel de los DOS agentes implicados (la nota deja de contar para uno y
+    empieza a contar para el otro)."""
+    row = await session.get(QualityAnalysis, analysis_id)
+    if not row:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Analysis not found")
+    nuevo = (data.agente_nombre or "").strip()
+    if not nuevo:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Falta el nombre del agente")
+    anterior = row.agente_nombre or ""
+    if nuevo == anterior:
+        return {"ok": True, "changed": False, "agente_nombre": anterior}
+
+    # Traza en el snapshot (JSONB): hay que reasignar el dict entero para que
+    # SQLAlchemy detecte el cambio — mutarlo in-place no se persiste.
+    snapshot = dict(row.crm_snapshot or {})
+    historial = list(snapshot.get("_reasignaciones") or [])
+    historial.append({
+        "de": anterior,
+        "a": nuevo,
+        "fecha": datetime.now(timezone.utc).isoformat(),
+        "actor": await actor_label(session, user),
+    })
+    snapshot["_reasignaciones"] = historial
+    row.crm_snapshot = snapshot
+    row.agente_nombre = nuevo
+    await session.commit()
+
+    # Re-nivelar a ambos: el motor respeta el switch `auto_evaluar` del
+    # departamento, así que no fuerza nada que el coordinador haya apagado.
+    niveles: dict[str, Any] = {}
+    for nombre in filter(None, {anterior, nuevo}):
+        try:
+            niveles[nombre] = await leveling.evaluate_by_name(session, nombre, auto_trigger=True)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("reasignar_leveling_failed", agente=nombre, error=str(exc)[:200])
+            niveles[nombre] = None
+
+    log.info("simulacro_reasignado", analysis_id=analysis_id, de=anterior, a=nuevo)
+    return {
+        "ok": True,
+        "changed": True,
+        "analysis_id": analysis_id,
+        "de": anterior,
+        "agente_nombre": nuevo,
+        "niveles": niveles,
+    }
 
 
 @router.delete("/{analysis_id}", status_code=204, dependencies=[Depends(require_role("admin"))])

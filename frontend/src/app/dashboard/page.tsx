@@ -269,7 +269,12 @@ function AgenteDetailModal({
     queryFn: () => api.analyses.list({ agente: agente.agente, limit: 50 }),
   });
   const refetchMemb = () => qc.invalidateQueries({ queryKey: ["sim-comerciales"] });
-  const after = () => { onChanged(); refetchMemb(); };
+  // Un cambio de nivel (manual) genera un evento nuevo: refresca el progreso.
+  const after = () => {
+    onChanged();
+    refetchMemb();
+    qc.invalidateQueries({ queryKey: ["agente-niveles", agente.agente] });
+  };
   const borrarAgente = useMutation({
     mutationFn: () => simulacrosApi.deleteAgente(agente.agente),
     onSuccess: () => {
@@ -347,6 +352,11 @@ function AgenteDetailModal({
           </div>
         </div>
       </div>
+
+      <div className="mt-6">
+        <NivelProgreso agente={agente.agente} />
+      </div>
+
       <div className="flex justify-start border-t border-border pt-3 mt-4">
         <button onClick={() => setConfirmar(true)} className="text-sm text-rose-400 hover:text-rose-300">Eliminar agente</button>
       </div>
@@ -361,6 +371,104 @@ function AgenteDetailModal({
       )}
       {verCall && <CallDetailModal id={verCall} onClose={() => setVerCall(null)} />}
     </Modal>
+  );
+}
+
+// ─── Progreso real de nivel: cada movimiento y lo que costó ──────────────────
+
+const ORIGEN_LABEL: Record<string, string> = {
+  auto: "Automático (regla)",
+  manual: "Manual",
+  alta: "Alta",
+};
+
+function NivelProgreso({ agente }: { agente: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["agente-niveles", agente],
+    queryFn: () => simulacrosApi.historialNiveles(agente),
+  });
+
+  if (isLoading) return <p className="text-sm text-muted">Cargando progreso…</p>;
+  const eventos = data?.eventos ?? [];
+  const actual = data?.actual ?? null;
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h4 className="font-medium">Progreso de nivel</h4>
+        <p className="text-xs text-muted">
+          Cada cambio de nivel y cuántos simulacros hicieron falta para llegar a él.
+        </p>
+      </div>
+
+      {actual && (
+        <div className="rounded-xl border border-border bg-bg/40 px-3 py-2 text-sm flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-muted">Ahora:</span>
+          <NivelBadge nivel={actual.nivel} />
+          {actual.departamento && <span className="text-muted text-xs">· {actual.departamento}</span>}
+          <span className="text-muted">
+            · <strong className="text-white tabular-nums">{actual.llamadas_en_nivel}</strong> llamada
+            {actual.llamadas_en_nivel === 1 ? "" : "s"} en este nivel
+          </span>
+          <span className="text-muted">· media <Nota v={actual.avg_percent_en_nivel} /></span>
+          {actual.desde && <span className="text-muted text-xs">· desde {fdate(actual.desde)}</span>}
+          <span className="text-muted text-xs ml-auto">{actual.llamadas_totales} en total</span>
+        </div>
+      )}
+
+      {!eventos.length ? (
+        <p className="text-sm text-muted">
+          Sin cambios de nivel registrados todavía. A partir de ahora cada subida o bajada
+          quedará aquí con las llamadas que costó.
+        </p>
+      ) : (
+        <div className="rounded-xl border border-border overflow-hidden max-h-72 overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-bg/50 text-muted text-left sticky top-0">
+              <tr>
+                <th className="px-3 py-1.5 font-medium">Fecha</th>
+                <th className="px-3 py-1.5 font-medium">Movimiento</th>
+                <th className="px-3 py-1.5 font-medium">Llamadas</th>
+                <th className="px-3 py-1.5 font-medium">Media</th>
+                <th className="px-3 py-1.5 font-medium">Origen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {eventos.map((e) => (
+                <tr key={e.id} className="border-t border-border align-top">
+                  <td className="px-3 py-1.5 text-muted whitespace-nowrap">{fdate(e.fecha)}</td>
+                  <td className="px-3 py-1.5 whitespace-nowrap">
+                    {e.from_nivel ? (
+                      <>
+                        <NivelBadge nivel={e.from_nivel} />
+                        <span className="mx-1 text-muted">{e.direction === "demote" ? "↓" : "→"}</span>
+                      </>
+                    ) : (
+                      <span className="text-muted text-xs mr-1">alta en</span>
+                    )}
+                    <NivelBadge nivel={e.to_nivel} />
+                    {e.departamento && <span className="block text-xs text-muted mt-0.5">{e.departamento}</span>}
+                  </td>
+                  <td className="px-3 py-1.5 tabular-nums">
+                    {e.from_nivel ? (
+                      <span title="Simulacros evaluados desde el cambio anterior">{e.llamadas_en_nivel}</span>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-1.5"><Nota v={e.avg_percent_en_nivel} /></td>
+                  <td className="px-3 py-1.5 text-muted">
+                    {ORIGEN_LABEL[e.origen] ?? e.origen}
+                    {e.motivo && <div className="text-xs text-zinc-500 mt-0.5">{e.motivo}</div>}
+                    {e.actor && <div className="text-xs text-zinc-500">{e.actor}</div>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 

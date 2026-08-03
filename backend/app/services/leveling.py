@@ -25,14 +25,20 @@ Examples the coordinator asked for:
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import settings
-from ..core.models import QualityAnalysis, SimulacroComercial, SimulacroDepartamento
+from ..core.models import (
+    QualityAnalysis,
+    SimulacroComercial,
+    SimulacroDepartamento,
+    SimulacroNivelEvento,
+)
 
 log = structlog.get_logger()
 
@@ -102,6 +108,161 @@ def _rule_matches(rule: dict[str, Any], tests: list[tuple[float, str | None]]) -
     return False
 
 
+# ── Historial de niveles (progreso real del agente) ─────────────────────────
+
+
+def _direction(niveles: list[str], from_nivel: str | None, to_nivel: str) -> str:
+    """promote / demote / lateral / alta, según la posición en la escala."""
+    if from_nivel is None:
+        return "alta"
+    try:
+        return "promote" if niveles.index(to_nivel) > niveles.index(from_nivel) else "demote"
+    except ValueError:
+        return "lateral"
+
+
+async def _llamadas_desde(
+    session: AsyncSession, agente_nombre: str, desde: datetime | None
+) -> tuple[int, int, float | None]:
+    """(llamadas_en_nivel, llamadas_totales, media_en_nivel) para este agente.
+
+    "En nivel" = simulacros completados DESDE `desde` (el último cambio de
+    nivel, o el alta). Es la respuesta a "cuántas llamadas hicieron falta".
+    Solo cuentan los evaluados (status done con nota)."""
+    stmt = select(QualityAnalysis.percent_quality, QualityAnalysis.created_at).where(
+        QualityAnalysis.agente_nombre == agente_nombre,
+        QualityAnalysis.status == "done",
+        QualityAnalysis.percent_quality.isnot(None),
+    )
+    rows = (await session.execute(stmt)).all()
+    total = len(rows)
+    en_nivel = [
+        float(p) for (p, created) in rows
+        if desde is None or (created is not None and created > desde)
+    ]
+    media = round(sum(en_nivel) / len(en_nivel), 2) if en_nivel else None
+    return len(en_nivel), total, media
+
+
+async def record_nivel_change(
+    session: AsyncSession,
+    comercial: SimulacroComercial,
+    *,
+    from_nivel: str | None,
+    to_nivel: str,
+    origen: str = "auto",
+    rule_id: str | None = None,
+    motivo: str = "",
+    actor: str | None = None,
+    niveles: list[str] | None = None,
+    departamento: str | None = None,
+) -> SimulacroNivelEvento:
+    """Deja constancia de un cambio de nivel y de cuánto trabajo costó.
+
+    Añade la fila a la sesión (NO hace commit: lo hace quien llama, junto al
+    cambio de nivel, para que ambas cosas viajen en la misma transacción)."""
+    if departamento is None and comercial.department_id:
+        dept = await session.get(SimulacroDepartamento, comercial.department_id)
+        departamento = dept.nombre if dept else None
+    if niveles is None:
+        niveles = _DEFAULT_NIVELES
+
+    # Punto de partida: el último evento de este agente EN ESTE departamento.
+    # Sin eventos previos contamos desde el principio de su historial.
+    # `== None` en SQL nunca casa: las fichas sin departamento necesitan IS NULL.
+    dept_cond = (
+        SimulacroNivelEvento.department_id.is_(None)
+        if comercial.department_id is None
+        else SimulacroNivelEvento.department_id == comercial.department_id
+    )
+    prev = (await session.execute(
+        select(SimulacroNivelEvento)
+        .where(SimulacroNivelEvento.agente_nombre == comercial.nombre, dept_cond)
+        .order_by(desc(SimulacroNivelEvento.created_at))
+        .limit(1)
+    )).scalars().first()
+    en_nivel, totales, media = await _llamadas_desde(
+        session, comercial.nombre, prev.created_at if prev else None
+    )
+
+    ev = SimulacroNivelEvento(
+        # Fijamos created_at en Python: con server_default el valor solo existe
+        # en la BD y leerlo tras el commit dispararía un refresh perezoso que
+        # en sesión async revienta (MissingGreenlet).
+        created_at=datetime.now(timezone.utc),
+        comercial_id=comercial.id,
+        agente_nombre=comercial.nombre,
+        department_id=comercial.department_id,
+        departamento=departamento,
+        from_nivel=from_nivel,
+        to_nivel=to_nivel,
+        direction=_direction(niveles, from_nivel, to_nivel),
+        origen=origen,
+        rule_id=rule_id,
+        motivo=motivo or None,
+        llamadas_en_nivel=en_nivel,
+        llamadas_totales=totales,
+        avg_percent_en_nivel=media,
+        actor=actor,
+    )
+    session.add(ev)
+    log.info(
+        "nivel_evento",
+        agente=comercial.nombre, from_nivel=from_nivel, to_nivel=to_nivel,
+        origen=origen, llamadas_en_nivel=en_nivel,
+    )
+    return ev
+
+
+def evento_to_dict(ev: SimulacroNivelEvento) -> dict[str, Any]:
+    return {
+        "id": ev.id,
+        "fecha": ev.created_at.isoformat() if ev.created_at else None,
+        "agente_nombre": ev.agente_nombre,
+        "comercial_id": ev.comercial_id,
+        "department_id": ev.department_id,
+        "departamento": ev.departamento,
+        "from_nivel": ev.from_nivel,
+        "to_nivel": ev.to_nivel,
+        "direction": ev.direction,
+        "origen": ev.origen,
+        "rule_id": ev.rule_id,
+        "motivo": ev.motivo or "",
+        "llamadas_en_nivel": ev.llamadas_en_nivel,
+        "llamadas_totales": ev.llamadas_totales,
+        "avg_percent_en_nivel": (
+            float(ev.avg_percent_en_nivel) if ev.avg_percent_en_nivel is not None else None
+        ),
+        "actor": ev.actor or "",
+    }
+
+
+async def progreso_en_nivel(
+    session: AsyncSession, agente_nombre: str, desde: datetime | None
+) -> dict[str, Any]:
+    """Progreso acumulado en el nivel ACTUAL (aún sin cambio registrado):
+    llamadas hechas desde `desde`, total histórico y nota media del tramo."""
+    en_nivel, totales, media = await _llamadas_desde(session, agente_nombre, desde)
+    return {
+        "llamadas_en_nivel": en_nivel,
+        "llamadas_totales": totales,
+        "avg_percent_en_nivel": media,
+    }
+
+
+async def historial(
+    session: AsyncSession, agente_nombre: str, *, limit: int = 100
+) -> list[dict[str, Any]]:
+    """Historial de niveles de un agente (todas sus fichas), más reciente primero."""
+    rows = (await session.execute(
+        select(SimulacroNivelEvento)
+        .where(SimulacroNivelEvento.agente_nombre == agente_nombre)
+        .order_by(desc(SimulacroNivelEvento.created_at))
+        .limit(max(1, min(limit, 500)))
+    )).scalars().all()
+    return [evento_to_dict(e) for e in rows]
+
+
 async def evaluate_and_apply(
     session: AsyncSession,
     comercial: SimulacroComercial,
@@ -142,9 +303,23 @@ async def evaluate_and_apply(
         if not to or to not in niveles:
             continue
         if _rule_matches(rule, tests):
+            motivo = (
+                f"regla '{rule.get('id')}' cumplida ({rule.get('metric')} "
+                f"n={rule.get('n')} ≥{rule.get('min_score')})"
+            )
+            evento = None
             if persist:
                 comercial.nivel = to
                 session.add(comercial)
+                # Constancia del movimiento + cuántos simulacros costó, en la
+                # MISMA transacción que el cambio de nivel.
+                evento = await record_nivel_change(
+                    session, comercial,
+                    from_nivel=current, to_nivel=to,
+                    origen="auto", rule_id=rule.get("id"), motivo=motivo,
+                    niveles=list(niveles),
+                    departamento=(dept.nombre if dept else None),
+                )
                 await session.commit()
             log.info(
                 "leveling_move",
@@ -154,8 +329,10 @@ async def evaluate_and_apply(
             return {
                 "changed": True, "from": current, "nivel": to,
                 "rule_id": rule.get("id"), "direction": rule.get("direction"),
-                "reason": f"regla '{rule.get('id')}' cumplida ({rule.get('metric')} n={rule.get('n')} ≥{rule.get('min_score')})",
+                "reason": motivo,
                 "tests_considerados": len(tests),
+                "llamadas_en_nivel": evento.llamadas_en_nivel if evento else None,
+                "evento": evento_to_dict(evento) if evento else None,
             }
 
     return {"changed": False, "nivel": current, "reason": "ninguna regla cumplida", "tests_considerados": len(tests)}
