@@ -363,6 +363,13 @@ async def _run_simulacro_audit(
         log.warning("simulacro_leveling_failed", comercial=agente, error=str(exc)[:200])
 
 
+def _analysis_id_for_call(call_id: str) -> str:
+    """Id determinista a partir del call_id de Retell. Es lo que hace que
+    reingestar la MISMA llamada caiga en la misma fila en vez de duplicarla."""
+    cid = (call_id or "").strip()
+    return "qa-" + hashlib.sha256(cid.encode()).hexdigest()[:12] if cid else ""
+
+
 async def _create_and_dispatch(
     session: SessionDep,
     graph,
@@ -383,6 +390,14 @@ async def _create_and_dispatch(
             f"Proyecto de simulacros '{settings.simulacros_project_id}' no existe. "
             "Ejecuta scripts.seed_simulacros.",
         )
+
+    # Idempotencia por call_id aunque quien llame no fije el id: si el snapshot
+    # trae un call_id de Retell, derivamos el mismo id determinista del webhook.
+    # Sin esto, una recuperación manual de llamadas perdidas inserta una fila
+    # nueva por cada intento y duplica simulacros ya existentes (que además
+    # inflan el recuento del agente y disparan el motor de escalado).
+    if not analysis_id:
+        analysis_id = _analysis_id_for_call((snapshot.get("_simulacro") or {}).get("call_id") or "")
 
     if analysis_id:
         existing = await session.get(QualityAnalysis, analysis_id)
@@ -570,7 +585,7 @@ async def retell_webhook(
         },
     }
 
-    analysis_id = "qa-" + hashlib.sha256(parsed["call_id"].encode()).hexdigest()[:12] if parsed["call_id"] else None
+    analysis_id = _analysis_id_for_call(parsed["call_id"]) or None
     row = await _create_and_dispatch(
         session, graph, background,
         analysis_id=analysis_id,
