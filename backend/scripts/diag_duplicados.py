@@ -36,6 +36,12 @@ Uso:
     # sí una avalancha sospechosa en un solo día (típico tras recuperar
     # llamadas antiguas: se insertan hoy y parecen todas de hoy):
     python -m scripts.diag_duplicados --fechas 2026-08-03
+
+    # Por qué la ficha de un agente muestra los saltos de nivel que muestra:
+    # secuencia real de sus llamadas con la dificultad de cada guión, sus
+    # cambios de nivel registrados (si hay) y si su departamento tiene guiones
+    # de todos los niveles (si no, la dificultad no refleja su nivel):
+    python -m scripts.diag_duplicados --agente micheller
 """
 from __future__ import annotations
 
@@ -49,7 +55,13 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.core.db import async_session
-from app.core.models import QualityAnalysis, SimulacroComercial, SimulacroNivelEvento
+from app.core.models import (
+    QualityAnalysis,
+    SimulacroComercial,
+    SimulacroDepartamento,
+    SimulacroNivelEvento,
+    SimulacroScenario,
+)
 
 _FUTURO = datetime.max.replace(tzinfo=timezone.utc)
 
@@ -197,7 +209,68 @@ async def _informe_fechas(rows: list[QualityAnalysis], dia: str) -> None:
         print("     Para recolocarlas hace falta el volcado de Retell (start_timestamp por call_id).")
 
 
-async def main(apply: bool, eventos_desde: str | None, dia_fechas: str | None) -> None:
+async def _informe_agente(s, rows: list[QualityAnalysis], nombre: str) -> None:
+    """Por qué la ficha de un agente muestra los saltos de nivel que muestra.
+
+    Sin cambios de nivel registrados, la trayectoria se DEDUCE de la dificultad
+    del guión de cada llamada. Pero `_pick_scenario` cae en un guión aleatorio
+    del departamento cuando no hay ninguno del nivel del agente, así que la
+    dificultad puede bailar sin que el agente se haya movido. Aquí se ve la
+    secuencia real y si el departamento tiene guiones de todos los niveles."""
+    suyas = sorted(
+        [a for a in rows if (a.agente_nombre or "") == nombre],
+        key=lambda a: a.call_date or a.created_at or _FUTURO,
+    )
+    print(f"\n[AGENTE {nombre}] {len(suyas)} simulacros")
+    if not suyas:
+        print("  (ninguno: ¿nombre mal escrito? el nombre es el alias que manda el CRM)")
+        return
+
+    fichas = (await s.execute(
+        select(SimulacroComercial).where(SimulacroComercial.nombre == nombre)
+    )).scalars().all()
+    for c in fichas:
+        dept = await s.get(SimulacroDepartamento, c.department_id) if c.department_id else None
+        print(f"  ficha: departamento={dept.nombre if dept else '(ninguno)'!r} "
+              f"nivel={c.nivel!r} activo={c.activo}")
+        if dept:
+            escenarios = (await s.execute(
+                select(SimulacroScenario).where(
+                    SimulacroScenario.department_id == dept.id,
+                    SimulacroScenario.activo.is_(True),
+                )
+            )).scalars().all()
+            por_dif: dict[str, int] = defaultdict(int)
+            for e in escenarios:
+                por_dif[e.dificultad or "(sin nivel)"] += 1
+            print(f"    guiones activos del departamento: {dict(por_dif) or 'NINGUNO'}")
+            faltan = [n for n in ("facil", "medio", "dificil") if not por_dif.get(n)]
+            if faltan:
+                print(f"    OJO: sin guiones de {faltan}. Cuando le toque uno de esos niveles,")
+                print("    el sistema coge un guión CUALQUIERA del departamento, así que la")
+                print("    dificultad de la llamada NO refleja su nivel real.")
+
+    eventos = (await s.execute(
+        select(SimulacroNivelEvento)
+        .where(SimulacroNivelEvento.agente_nombre == nombre)
+        .order_by(SimulacroNivelEvento.created_at)
+    )).scalars().all()
+    print(f"  cambios de nivel REGISTRADOS: {len(eventos)}")
+    for e in eventos:
+        print(f"    {_fecha(e.created_at)}  {e.from_nivel or '—'} → {e.to_nivel}  ({e.origen})")
+    if not eventos:
+        print("    -> ninguno. Todo lo que muestre la ficha es DEDUCIDO de la columna")
+        print("       'dificultad' de aquí abajo, no un cambio de nivel real.")
+
+    print(f"\n  {'fecha llamada':<17} {'dificultad':<12} {'nota':>5}  escenario")
+    for a in suyas:
+        dif = _sim(a).get("scenario", {}).get("dificultad") or "—"
+        print(f"  {_fecha(a.call_date or a.created_at):<17} {dif:<12} "
+              f"{str(a.percent_quality or '—'):>5}  {(a.escenario or '—')[:40]}")
+
+
+async def main(apply: bool, eventos_desde: str | None, dia_fechas: str | None,
+               agente: str | None) -> None:
     print(f"\n=== Duplicados de simulacros — modo: {'APLICAR CAMBIOS' if apply else 'solo informe'} ===")
 
     async with async_session() as s:
@@ -233,6 +306,8 @@ async def main(apply: bool, eventos_desde: str | None, dia_fechas: str | None) -
         await _informe_distribucion(list(rows))
         if dia_fechas:
             await _informe_fechas(list(rows), dia_fechas)
+        if agente:
+            await _informe_agente(s, list(rows), agente)
 
         # Cambios de nivel recientes: aquí se ve si la avalancha disparó el motor.
         evs = (await s.execute(
@@ -295,4 +370,5 @@ if __name__ == "__main__":
         "--apply" in args,
         _valor(args, "--eventos-desde"),
         _valor(args, "--fechas"),
+        _valor(args, "--agente"),
     ))
