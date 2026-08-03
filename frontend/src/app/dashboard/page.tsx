@@ -602,25 +602,48 @@ function CallDetailModal({ id, onClose }: { id: string; onClose: () => void }) {
 
 function MembershipRow({ nombre, m, onChanged }: { nombre: string; m: AgenteRow["memberships"][number]; onChanged: () => void }) {
   const base = { extension: "", nombre, default_scenario_id: null, department_id: m.department_id };
+  const [veredicto, setVeredicto] = useState("");
   const setNivel = useMutation({ mutationFn: (nivel: string) => simulacrosApi.updateComercial(m.id, { ...base, nivel, activo: m.activo }), onSuccess: onChanged });
   const activar = useMutation({ mutationFn: () => simulacrosApi.updateComercial(m.id, { ...base, nivel: m.nivel, activo: true }), onSuccess: onChanged });
   const quitar = useMutation({ mutationFn: () => simulacrosApi.deleteComercial(m.id), onSuccess: onChanged });
+  // Aplica las reglas de escalado del departamento a los datos de HOY. Útil
+  // tras corregir datos: en vez de decidir el nivel a ojo, lo dice el criterio
+  // ya configurado. Si ninguna regla se cumple, no toca nada y explica por qué.
+  const reevaluar = useMutation({
+    mutationFn: () => simulacrosApi.evaluateLevel(m.id),
+    onSuccess: (r) => {
+      setVeredicto(r.changed ? `Movido a ${r.nivel}: ${r.reason ?? ""}` : `Sin cambios: ${r.reason ?? ""}`);
+      onChanged();
+    },
+    onError: () => setVeredicto("No se pudo evaluar."),
+  });
   return (
-    <div className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 bg-bg/40">
-      <span className="flex-1 truncate">{m.departamento}</span>
-      <select
-        value={m.nivel ?? "medio"}
-        onChange={(e) => setNivel.mutate(e.target.value)}
-        className={`text-xs px-2 py-1 rounded-lg border bg-bg ${DIFF_COLOR[m.nivel ?? ""] ?? "border-border"}`}
-      >
-        {NIVELES.map((n) => <option key={n} value={n}>{n}</option>)}
-      </select>
-      {m.activo ? (
-        <span className="text-xs px-2 py-0.5 rounded-full border border-emerald-700 bg-emerald-900/30 text-emerald-300">Activo</span>
-      ) : (
-        <button onClick={() => activar.mutate()} className="text-xs text-accent hover:underline">Activar</button>
-      )}
-      <button onClick={() => { if (confirm(`¿Quitar a ${nombre} de ${m.departamento}?`)) quitar.mutate(); }} className="text-xs text-rose-400 hover:text-rose-300">Quitar</button>
+    <div className="rounded-xl border border-border px-3 py-2 bg-bg/40 space-y-1">
+      <div className="flex items-center gap-2">
+        <span className="flex-1 truncate">{m.departamento}</span>
+        <select
+          value={m.nivel ?? "medio"}
+          onChange={(e) => setNivel.mutate(e.target.value)}
+          className={`text-xs px-2 py-1 rounded-lg border bg-bg ${DIFF_COLOR[m.nivel ?? ""] ?? "border-border"}`}
+        >
+          {NIVELES.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+        {m.activo ? (
+          <span className="text-xs px-2 py-0.5 rounded-full border border-emerald-700 bg-emerald-900/30 text-emerald-300">Activo</span>
+        ) : (
+          <button onClick={() => activar.mutate()} className="text-xs text-accent hover:underline">Activar</button>
+        )}
+        <button
+          onClick={() => reevaluar.mutate()}
+          disabled={reevaluar.isPending}
+          title="Aplicar las reglas de escalado del departamento con los datos actuales"
+          className="text-xs text-accent hover:underline disabled:opacity-40"
+        >
+          {reevaluar.isPending ? "…" : "Reevaluar nivel"}
+        </button>
+        <button onClick={() => { if (confirm(`¿Quitar a ${nombre} de ${m.departamento}?`)) quitar.mutate(); }} className="text-xs text-rose-400 hover:text-rose-300">Quitar</button>
+      </div>
+      {veredicto && <p className="text-xs text-muted">{veredicto}</p>}
     </div>
   );
 }
