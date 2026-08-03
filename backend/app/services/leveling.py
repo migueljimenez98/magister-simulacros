@@ -22,6 +22,15 @@ Examples the coordinator asked for:
        metric:count_above,n:3,min_score:80}
   - "media de los últimos 4 tests > 80 → siguiente nivel":
       {from:medio,to:dificil,direction:promote,metric:avg_last_n,n:4,min_score:80}
+
+REGLA DE ORO: las reglas solo miran los tests hechos EN EL NIVEL ACTUAL, es
+decir posteriores al último cambio de nivel. Sin esto el agente rebota: al subir
+de fácil a difícil, la ventana seguía llena de tests fáciles (con mejor nota,
+porque el guión era más blando) mezclados con los primeros difíciles (peores, es
+más duro), y una regla de bajada saltaba inmediatamente. Subía y bajaba en
+bucle. Empezando el contador de cero en cada cambio, para volver a moverse hace
+falta rendimiento demostrado en el nivel nuevo — que es lo que mide de verdad si
+está preparado.
 """
 from __future__ import annotations
 
@@ -71,10 +80,39 @@ def _percent(row: QualityAnalysis) -> float | None:
         return None
 
 
+async def _nivel_desde(
+    session: AsyncSession, comercial: SimulacroComercial
+) -> datetime | None:
+    """Cuándo entró en el nivel que tiene ahora (su último cambio registrado).
+    None si no consta ninguno — entonces cuenta todo su historial."""
+    dept_cond = (
+        SimulacroNivelEvento.department_id.is_(None)
+        if comercial.department_id is None
+        else SimulacroNivelEvento.department_id == comercial.department_id
+    )
+    ev = (await session.execute(
+        select(SimulacroNivelEvento)
+        .where(SimulacroNivelEvento.agente_nombre == comercial.nombre, dept_cond)
+        .order_by(desc(SimulacroNivelEvento.created_at))
+        .limit(1)
+    )).scalars().first()
+    return ev.created_at if ev else None
+
+
+def _fecha_llamada(row: QualityAnalysis) -> datetime | None:
+    return row.call_date or row.created_at
+
+
 async def _recent_tests(
-    session: AsyncSession, comercial: SimulacroComercial, project_id: str, limit: int = 30
+    session: AsyncSession,
+    comercial: SimulacroComercial,
+    project_id: str,
+    limit: int = 30,
+    desde: datetime | None = None,
 ) -> list[QualityAnalysis]:
-    rows = (await session.execute(
+    """Sus tests más recientes. Con `desde`, SOLO los hechos a partir de ese
+    momento: es lo que acota la evaluación al nivel actual y evita el rebote."""
+    stmt = (
         select(QualityAnalysis)
         .where(
             QualityAnalysis.project_id == project_id,
@@ -83,8 +121,10 @@ async def _recent_tests(
         )
         .order_by(_FECHA_LLAMADA.desc())
         .limit(limit)
-    )).scalars().all()
-    return list(rows)
+    )
+    if desde is not None:
+        stmt = stmt.where(_FECHA_LLAMADA > desde)
+    return list((await session.execute(stmt)).scalars().all())
 
 
 def _rule_matches(rule: dict[str, Any], tests: list[tuple[float, str | None]]) -> bool:
@@ -298,10 +338,23 @@ async def evaluate_and_apply(
     if not reglas:
         return {"changed": False, "nivel": current, "reason": "sin reglas configuradas"}
 
-    rows = await _recent_tests(session, comercial, project_id)
+    # Solo cuentan los tests hechos EN EL NIVEL ACTUAL (posteriores al último
+    # cambio). Ver "REGLA DE ORO" en la cabecera: mezclar niveles hacía rebotar
+    # al agente entre fácil y difícil.
+    desde = await _nivel_desde(session, comercial)
+    rows = await _recent_tests(session, comercial, project_id, desde=desde)
     tests = [(p, _scenario_dificultad(r)) for r in rows if (p := _percent(r)) is not None]
     if not tests:
-        return {"changed": False, "nivel": current, "reason": "sin tests completados todavía"}
+        return {
+            "changed": False,
+            "nivel": current,
+            "reason": (
+                f"sin tests en el nivel '{current}' todavía: para volver a moverse "
+                "tiene que rendir en el nivel en el que está"
+                if desde else "sin tests completados todavía"
+            ),
+            "desde_nivel": desde.isoformat() if desde else None,
+        }
 
     for rule in reglas:
         if (rule.get("from_nivel") or "") != current:
@@ -312,7 +365,8 @@ async def evaluate_and_apply(
         if _rule_matches(rule, tests):
             motivo = (
                 f"regla '{rule.get('id')}' cumplida ({rule.get('metric')} "
-                f"n={rule.get('n')} ≥{rule.get('min_score')})"
+                f"n={rule.get('n')} ≥{rule.get('min_score')}) con {len(tests)} "
+                f"test(s) en el nivel '{current}'"
             )
             evento = None
             if persist:
@@ -342,7 +396,17 @@ async def evaluate_and_apply(
                 "evento": evento_to_dict(evento) if evento else None,
             }
 
-    return {"changed": False, "nivel": current, "reason": "ninguna regla cumplida", "tests_considerados": len(tests)}
+    return {
+        "changed": False,
+        "nivel": current,
+        "reason": (
+            f"ninguna regla cumplida con los {len(tests)} test(s) hechos en el "
+            f"nivel '{current}'"
+            if desde else f"ninguna regla cumplida ({len(tests)} test(s))"
+        ),
+        "tests_considerados": len(tests),
+        "desde_nivel": desde.isoformat() if desde else None,
+    }
 
 
 async def evaluate_by_name(
