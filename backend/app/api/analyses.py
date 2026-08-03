@@ -365,25 +365,32 @@ async def evolucion_agente(nombre: str, session: SessionDep) -> dict[str, Any]:
         .order_by(SimulacroNivelEvento.created_at)
     )).scalars().all()
 
-    def _tramo(
-        nivel: str | None, desde: datetime | None, hasta: datetime | None,
-        estimado: bool, salida: dict[str, Any] | None,
-    ) -> dict[str, Any]:
-        idx = [
+    def _idx_entre(desde: datetime | None, hasta: datetime | None) -> list[int]:
+        return [
             i for i, f in enumerate(fechas)
             if f is not None
             and (desde is None or f > desde)
             and (hasta is None or f <= hasta)
         ]
+
+    def _stats(idx: list[int]) -> tuple[int, int, float | None]:
         vals = [llamadas[i]["percent"] for i in idx if llamadas[i]["percent"] is not None]
+        return len(idx), len(vals), _avg1(vals)
+
+    def _tramo(
+        nivel: str | None, desde: datetime | None, hasta: datetime | None,
+        estimado: bool, salida: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        n, evaluadas, avg = _stats(_idx_entre(desde, hasta))
         return {
             "nivel": nivel,
             "desde": desde.isoformat() if desde else None,
             "hasta": hasta.isoformat() if hasta else None,
-            "llamadas": len(idx),
-            "evaluadas": len(vals),
-            "avg_percent": _avg1(vals),
+            "llamadas": n,
+            "evaluadas": evaluadas,
+            "avg_percent": avg,
             "estimado": estimado,
+            "inferido": False,
             "salida": salida,
             "en_curso": hasta is None,
         }
@@ -417,6 +424,93 @@ async def evolucion_agente(nombre: str, session: SessionDep) -> dict[str, Any]:
     # Tramo abierto: el nivel de hoy. Si nunca hubo eventos, TODO el historial
     # cae aquí y se marca estimado (no sabemos si antes estuvo en otro nivel).
     tramos.append(_tramo(nivel_actual, prev, None, not eventos, None))
+
+    # Reconstrucción del pasado: antes de la migración 0008 nadie guardaba los
+    # cambios de nivel, así que TODO el histórico caería en un único tramo
+    # inútil. Pero el sistema asigna a cada agente guiones de SU nivel
+    # (_pick_scenario), así que la dificultad del guión de cada llamada es una
+    # huella de en qué nivel estaba entonces: cuando la dificultad cambia y se
+    # mantiene, ahí hubo un cambio de nivel. Lo derivamos y lo marcamos como
+    # inferido — es una reconstrucción, no un registro.
+    def _inferir_por_dificultad(tramo: dict[str, Any]) -> list[dict[str, Any]]:
+        desde = datetime.fromisoformat(tramo["desde"]) if tramo["desde"] else None
+        hasta = datetime.fromisoformat(tramo["hasta"]) if tramo["hasta"] else None
+        idx = _idx_entre(desde, hasta)
+        # Rachas de llamadas consecutivas con la misma dificultad.
+        rachas: list[list[Any]] = []
+        huerfanas: list[int] = []  # sin dificultad y aún sin racha a la que pegarse
+        for i in idx:
+            d = llamadas[i]["dificultad"]
+            if not d:  # sin dato → se pega a la racha en curso
+                (rachas[-1][1] if rachas else huerfanas).append(i)
+                continue
+            if rachas and rachas[-1][0] == d:
+                rachas[-1][1].append(i)
+            else:
+                rachas.append([d, [i]])
+        if rachas and huerfanas:  # las de cabecera van con la primera racha
+            rachas[0][1] = sorted(huerfanas + rachas[0][1])
+
+        # Una racha suelta suele ser ruido (el guión de ese nivel no existía y
+        # _pick_scenario cayó en uno aleatorio), no un cambio de nivel real.
+        fusionadas: list[list[Any]] = []
+        for d, ids in rachas:
+            if fusionadas and len(ids) < 2:
+                fusionadas[-1][1].extend(ids)
+            else:
+                fusionadas.append([d, list(ids)])
+        # Tras absorber el ruido pueden quedar dos rachas seguidas del MISMO
+        # nivel; unirlas o la ficha mostraría un "difícil → difícil" inexistente.
+        colapsadas: list[list[Any]] = []
+        for d, ids in fusionadas:
+            if colapsadas and colapsadas[-1][0] == d:
+                colapsadas[-1][1].extend(ids)
+            else:
+                colapsadas.append([d, list(ids)])
+        fusionadas = [[d, sorted(ids)] for d, ids in colapsadas]
+        if len(fusionadas) < 2:
+            return [tramo]  # un solo nivel detectado: no aporta nada partirlo
+
+        out: list[dict[str, Any]] = []
+        for k, (d, ids) in enumerate(fusionadas):
+            ultima = k == len(fusionadas) - 1
+            siguiente = fusionadas[k + 1] if not ultima else None
+            f_ini, f_fin = fechas[ids[0]], fechas[ids[-1]]
+            n, evaluadas, avg = _stats(ids)
+            salida = None
+            if siguiente:
+                f_cambio = fechas[siguiente[1][0]]
+                orden = _NIVEL_ORDER
+                sube = (
+                    d in orden and siguiente[0] in orden
+                    and orden.index(siguiente[0]) > orden.index(d)
+                )
+                salida = {
+                    "fecha": f_cambio.isoformat() if f_cambio else None,
+                    "to_nivel": siguiente[0],
+                    "direction": "promote" if sube else "demote",
+                    "origen": "inferido",
+                    "motivo": "deducido del cambio de dificultad de los guiones",
+                    "actor": "",
+                }
+            out.append({
+                "nivel": d,
+                "desde": f_ini.isoformat() if f_ini else None,
+                "hasta": (None if (ultima and tramo["en_curso"]) else (f_fin.isoformat() if f_fin else None)),
+                "llamadas": n,
+                "evaluadas": evaluadas,
+                "avg_percent": avg,
+                "estimado": True,
+                "inferido": True,
+                "salida": salida if salida else tramo["salida"],
+                "en_curso": ultima and tramo["en_curso"],
+            })
+        return out
+
+    expandidos: list[dict[str, Any]] = []
+    for t in tramos:
+        expandidos.extend(_inferir_por_dificultad(t) if t["estimado"] and t["llamadas"] else [t])
+    tramos = expandidos
 
     deptos = {d.id: d.nombre for d in (await session.execute(
         select(SimulacroDepartamento)

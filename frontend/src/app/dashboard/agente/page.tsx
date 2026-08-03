@@ -26,6 +26,7 @@ const ORIGEN_LABEL: Record<string, string> = {
   auto: "regla automática",
   manual: "cambio manual",
   alta: "alta",
+  inferido: "fecha aproximada",
 };
 const fdate = (s: string | null | undefined) =>
   s ? new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" }) : "—";
@@ -92,7 +93,9 @@ function Inner() {
         <div>
           <h3 className="font-semibold">Trayectoria por nivel</h3>
           <p className="text-xs text-muted">
-            Cuántos simulacros hizo en cada nivel y cómo salió de él.
+            Cuántos simulacros hizo en cada nivel, cuándo cambió y por qué. Los tramos marcados
+            “deducido del guión” son anteriores al registro de niveles: se reconstruyen mirando la
+            dificultad de los guiones que se le asignaron, así que la fecha del cambio es aproximada.
           </p>
         </div>
         <div className="space-y-2">
@@ -209,17 +212,26 @@ function TramoRow({ t }: { t: TramoNivel }) {
       <span className="text-muted text-xs">
         · {fdate(t.desde) === "—" ? "desde el principio" : fdate(t.desde)} → {t.en_curso ? "hoy" : fdate(t.hasta)}
       </span>
-      {t.estimado && (
+      {t.inferido ? (
+        <span
+          className="text-xs text-amber-300/80"
+          title="Tramo reconstruido a partir de la dificultad de los guiones que se le asignaron (a cada agente se le dan guiones de su nivel). El recuento de simulacros es exacto; la fecha del cambio es aproximada."
+        >
+          · deducido del guión
+        </span>
+      ) : t.estimado ? (
         <span
           className="text-xs text-amber-300/80"
           title="Periodo anterior al registro de cambios de nivel: el recuento de simulacros es exacto, pero pudo haber estado en otro nivel durante parte de ese tiempo."
         >
           · anterior al registro
         </span>
-      )}
+      ) : null}
       {s && (
         <span className="text-xs text-muted ml-auto">
-          {flecha} <strong className="text-white">{s.to_nivel}</strong> ({ORIGEN_LABEL[s.origen] ?? s.origen})
+          {flecha} <strong className="text-white">{s.to_nivel}</strong>
+          {s.fecha && <> el <strong className="text-white">{fdate(s.fecha)}</strong></>}
+          {" "}({ORIGEN_LABEL[s.origen] ?? s.origen})
         </span>
       )}
     </div>

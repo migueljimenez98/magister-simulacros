@@ -217,9 +217,11 @@ export interface TramoNivel {
   llamadas: number;
   evaluadas: number;
   avg_percent: number | null;
-  // true = no hay eventos de nivel que cubran ese periodo (histórico antiguo):
-  // sabemos cuántas llamadas fueron, no en qué nivel estaba.
+  // true = no hay eventos de nivel que cubran ese periodo (histórico antiguo).
   estimado: boolean;
+  // true = el tramo se dedujo del cambio de dificultad de los guiones, no de
+  // un cambio de nivel registrado. Es una reconstrucción, no un dato.
+  inferido: boolean;
   en_curso: boolean;
   salida: {
     fecha: string | null;
