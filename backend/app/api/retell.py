@@ -363,6 +363,22 @@ async def _run_simulacro_audit(
         log.warning("simulacro_leveling_failed", comercial=agente, error=str(exc)[:200])
 
 
+def _call_date_from(start_timestamp: Any) -> datetime | None:
+    """Hora real de la llamada a partir del `start_timestamp` de Retell (epoch
+    en milisegundos). None si no viene o es basura — entonces se usa la hora de
+    procesado, que es lo que se hacía siempre."""
+    try:
+        ms = int(start_timestamp)
+    except (TypeError, ValueError):
+        return None
+    if ms <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def _analysis_id_for_call(call_id: str) -> str:
     """Id determinista a partir del call_id de Retell. Es lo que hace que
     reingestar la MISMA llamada caiga en la misma fila en vez de duplicarla."""
@@ -380,6 +396,7 @@ async def _create_and_dispatch(
     transcript: str,
     snapshot: dict[str, Any],
     numero: str,
+    call_date: datetime | None = None,
 ) -> QualityAnalysis:
     """Insert a pending simulacro analysis and schedule the audit graph.
     Idempotent when `analysis_id` is provided (re-delivered webhook → skip)."""
@@ -409,7 +426,7 @@ async def _create_and_dispatch(
         project_id=settings.simulacros_project_id,
         numero=numero or "simulacro",
         agente_nombre=agente or "(simulacro)",
-        call_date=datetime.now(timezone.utc),
+        call_date=call_date or datetime.now(timezone.utc),
         status="pending",
         crm_snapshot=snapshot,
     )
@@ -593,6 +610,7 @@ async def retell_webhook(
         transcript=transcript,
         snapshot=snapshot,
         numero=parsed["from_number"] or parsed["call_id"],
+        call_date=_call_date_from(parsed.get("start_timestamp")),
     )
     log.info("retell_webhook_dispatched", analysis_id=row.id, call_id=parsed["call_id"])
     return {"ok": True, "analysis_id": row.id}

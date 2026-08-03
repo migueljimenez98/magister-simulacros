@@ -102,7 +102,9 @@ export default function LogLlamadasPage() {
                     </span>
                   </td>
                   <td className="px-4 py-2 text-muted whitespace-nowrap">
-                    {new Date(r.created_at).toLocaleString("es-ES")}
+                    {/* Cuándo ocurrió la llamada, no cuándo se proceso: en las
+                        recuperadas no es lo mismo. */}
+                    {new Date(r.call_date ?? r.created_at).toLocaleString("es-ES")}
                   </td>
                   <td className="px-4 py-2 text-muted whitespace-nowrap">
                     {r.status === "done" ? new Date(r.updated_at).toLocaleString("es-ES") : "—"}

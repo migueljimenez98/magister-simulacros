@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import structlog
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import settings
@@ -43,6 +43,13 @@ from ..core.models import (
 log = structlog.get_logger()
 
 _DEFAULT_NIVELES = ["facil", "medio", "dificil"]
+
+# CUÁNDO OCURRIÓ la llamada, no cuándo se insertó la fila. La diferencia importa
+# al recuperar llamadas perdidas: se insertan hoy (created_at) pero son de días
+# pasados (call_date). Ordenando por inserción, una recuperación de 34 llamadas
+# antiguas se cuela como "los últimos 34 tests" y mueve de nivel a quien no toca
+# (pasó el 2026-08-03 con micheller: bajó a fácil por llamadas del 30-31 jul).
+_FECHA_LLAMADA = func.coalesce(QualityAnalysis.call_date, QualityAnalysis.created_at)
 
 
 def _scenario_dificultad(row: QualityAnalysis) -> str | None:
@@ -74,7 +81,7 @@ async def _recent_tests(
             QualityAnalysis.agente_nombre == comercial.nombre,
             QualityAnalysis.status == "done",
         )
-        .order_by(QualityAnalysis.created_at.desc())
+        .order_by(_FECHA_LLAMADA.desc())
         .limit(limit)
     )).scalars().all()
     return list(rows)
@@ -129,7 +136,7 @@ async def _llamadas_desde(
     "En nivel" = simulacros completados DESDE `desde` (el último cambio de
     nivel, o el alta). Es la respuesta a "cuántas llamadas hicieron falta".
     Solo cuentan los evaluados (status done con nota)."""
-    stmt = select(QualityAnalysis.percent_quality, QualityAnalysis.created_at).where(
+    stmt = select(QualityAnalysis.percent_quality, _FECHA_LLAMADA).where(
         QualityAnalysis.agente_nombre == agente_nombre,
         QualityAnalysis.status == "done",
         QualityAnalysis.percent_quality.isnot(None),
@@ -137,8 +144,8 @@ async def _llamadas_desde(
     rows = (await session.execute(stmt)).all()
     total = len(rows)
     en_nivel = [
-        float(p) for (p, created) in rows
-        if desde is None or (created is not None and created > desde)
+        float(p) for (p, fecha) in rows
+        if desde is None or (fecha is not None and fecha > desde)
     ]
     media = round(sum(en_nivel) / len(en_nivel), 2) if en_nivel else None
     return len(en_nivel), total, media

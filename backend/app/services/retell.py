@@ -117,6 +117,12 @@ def parse_webhook(payload: dict[str, Any]) -> dict[str, Any]:
         "transcript": _coerce_transcript(call),
         "recording_url": call.get("recording_url") or "",
         "duration_ms": call.get("duration_ms") or call.get("call_duration_ms"),
+        # Epoch en MILISEGUNDOS. Es la hora real de la llamada: sin ella la
+        # evaluación se fecha con la hora de procesado, que solo coincide
+        # mientras el webhook llegue al momento. Al reprocesar en diferido
+        # (webhook retrasado, recuperación de llamadas perdidas) deja de
+        # coincidir y desordena el histórico del agente.
+        "start_timestamp": call.get("start_timestamp"),
         "dynamic_variables": dyn if isinstance(dyn, dict) else {},
         "custom_sip_headers": sip if isinstance(sip, dict) else {},
         "metadata": call.get("metadata") if isinstance(call.get("metadata"), dict) else {},

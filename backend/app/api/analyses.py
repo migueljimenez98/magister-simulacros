@@ -37,6 +37,11 @@ def _recommend_nivel(actual: str | None, avg: float | None) -> str | None:
 log = structlog.get_logger()
 router = APIRouter(prefix="/analyses", tags=["analyses"], dependencies=[Depends(current_user)])
 
+# CUÁNDO OCURRIÓ la llamada, no cuándo se insertó la fila. Al recuperar llamadas
+# perdidas se insertan hoy pero son de días pasados; agrupar por `created_at`
+# las amontona todas en el día de la recuperación y falsea el progreso.
+_FECHA_LLAMADA = func.coalesce(QualityAnalysis.call_date, QualityAnalysis.created_at)
+
 
 class AnalysisOut(BaseModel):
     id: str
@@ -111,7 +116,9 @@ async def list_analyses(
         conds.append(QualityAnalysis.agente_nombre.ilike(f"%{search}%"))
 
     total_stmt = select(func.count()).select_from(QualityAnalysis)
-    rows_stmt = select(*_LIST_COLUMNS).order_by(desc(QualityAnalysis.created_at)).limit(limit).offset(offset)
+    # Orden por fecha de LLAMADA: una recuperación de llamadas antiguas no debe
+    # colarse al principio del log como si acabara de ocurrir.
+    rows_stmt = select(*_LIST_COLUMNS).order_by(desc(_FECHA_LLAMADA)).limit(limit).offset(offset)
     for c in conds:
         total_stmt = total_stmt.where(c)
         rows_stmt = rows_stmt.where(c)
@@ -152,23 +159,23 @@ async def stats(
         conds.append(QualityAnalysis.agente_nombre == agente)
     if desde:
         try:
-            conds.append(QualityAnalysis.created_at >= datetime.fromisoformat(desde))
+            conds.append(_FECHA_LLAMADA >= datetime.fromisoformat(desde))
         except ValueError:
             pass
     if hasta:
         try:
-            conds.append(QualityAnalysis.created_at <= datetime.fromisoformat(hasta))
+            conds.append(_FECHA_LLAMADA <= datetime.fromisoformat(hasta))
         except ValueError:
             pass
 
     stmt = select(
         QualityAnalysis.id, QualityAnalysis.agente_nombre, QualityAnalysis.departamento,
         QualityAnalysis.status, QualityAnalysis.percent_quality, QualityAnalysis.scores,
-        QualityAnalysis.crm_snapshot, QualityAnalysis.created_at,
+        QualityAnalysis.crm_snapshot, _FECHA_LLAMADA,
     )
     for c in conds:
         stmt = stmt.where(c)
-    rows = (await session.execute(stmt.order_by(QualityAnalysis.created_at))).all()
+    rows = (await session.execute(stmt.order_by(_FECHA_LLAMADA))).all()
 
     # Rule id → friendly name (from the project's rubric).
     project = await session.get(QualityProject, settings.simulacros_project_id)
@@ -192,14 +199,14 @@ async def stats(
     ag_count: dict[str, int] = {}                # agente -> total calls
     ag_last: dict[str, dict[str, Any]] = {}      # agente -> last call info
 
-    for aid, agente_nombre, depto, st, pq, scores, snap, created in rows:
+    for aid, agente_nombre, depto, st, pq, scores, snap, fecha in rows:
         by_status[st] = by_status.get(st, 0) + 1
         if agente_nombre:
             ag_count[agente_nombre] = ag_count.get(agente_nombre, 0) + 1
-            # rows are ascending by created_at → keep overwriting = most recent.
+            # rows ascendentes por fecha de llamada → sobrescribir deja la última.
             ag_last[agente_nombre] = {
                 "id": aid,
-                "fecha": created.isoformat() if created else None,
+                "fecha": fecha.isoformat() if fecha else None,
                 "nota": float(pq) if pq is not None else None,
                 "departamento": depto,
                 "status": st,
@@ -208,7 +215,7 @@ async def stats(
             continue
         p = float(pq)
         percents.append(p)
-        day = created.date().isoformat() if created else "—"
+        day = fecha.date().isoformat() if fecha else "—"
         ts.setdefault(day, []).append(p)
         if agente_nombre:
             por_ag.setdefault(agente_nombre, []).append(p)
@@ -324,9 +331,10 @@ async def evolucion_agente(nombre: str, session: SessionDep) -> dict[str, Any]:
             QualityAnalysis.departamento,
             QualityAnalysis.scores,
             dificultad_col.label("dificultad"),
+            _FECHA_LLAMADA.label("fecha_llamada"),
         )
         .where(QualityAnalysis.agente_nombre == nombre)
-        .order_by(QualityAnalysis.created_at)
+        .order_by(_FECHA_LLAMADA)
     )).mappings().all()
 
     llamadas: list[dict[str, Any]] = []
@@ -336,16 +344,19 @@ async def evolucion_agente(nombre: str, session: SessionDep) -> dict[str, Any]:
     notas: list[float] = []
     for r in rows:
         pq = float(r["percent_quality"]) if r["percent_quality"] is not None else None
+        # `fecha` es cuándo se hizo la llamada: es lo que ordena la trayectoria
+        # y la curva. Usar la de inserción amontonaría las recuperadas en un día.
+        f_llamada = r["fecha_llamada"]
         llamadas.append({
             "id": r["id"],
-            "fecha": r["created_at"].isoformat() if r["created_at"] else None,
+            "fecha": f_llamada.isoformat() if f_llamada else None,
             "escenario": r["escenario"],
             "departamento": r["departamento"],
             "dificultad": r["dificultad"],
             "percent": pq,
             "status": r["status"],
         })
-        fechas.append(r["created_at"])
+        fechas.append(f_llamada)
         if r["status"] != "done" or pq is None:
             continue
         notas.append(pq)
