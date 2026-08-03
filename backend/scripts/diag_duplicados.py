@@ -125,19 +125,42 @@ def _grupos(rows: list[QualityAnalysis]) -> list[tuple[str, str, list[QualityAna
 
 
 async def _informe_distribucion(rows: list[QualityAnalysis]) -> None:
-    """Simulacros por agente y día — para ver de un vistazo el pico anómalo."""
-    por_dia: dict[tuple[str, str], int] = defaultdict(int)
+    """Simulacros por agente y día, contados de las DOS formas.
+
+    - Por fecha de llamada (`call_date`): la realidad, y lo que usan el panel,
+      las estadísticas y el motor de escalado.
+    - Por fecha de inserción (`created_at`): cuándo entró la fila. Un pico aquí
+      que no existe en la columna de la izquierda es una recuperación de
+      llamadas antiguas — normal, no un problema.
+
+    Si las dos columnas coinciden en todo, es que cada llamada se evaluó el día
+    que ocurrió y nunca hubo recuperaciones."""
+    por_llamada: dict[tuple[str, str], int] = defaultdict(int)
+    por_insercion: dict[tuple[str, str], int] = defaultdict(int)
     for a in rows:
-        dia = a.created_at.date().isoformat() if a.created_at else "—"
-        por_dia[(a.agente_nombre or "(sin agente)", dia)] += 1
-    print("\n[SIMULACROS POR AGENTE Y DÍA]  (solo días con 5 o más)")
-    hubo = False
-    for (ag, dia), n in sorted(por_dia.items(), key=lambda kv: (-kv[1], kv[0])):
-        if n >= 5:
-            hubo = True
-            print(f"  {dia}  {ag:<28} {n:>4}")
-    if not hubo:
-        print("  (ningún agente supera los 5 simulacros en un mismo día)")
+        ag = a.agente_nombre or "(sin agente)"
+        f_real = a.call_date or a.created_at
+        por_llamada[(ag, f_real.date().isoformat() if f_real else "—")] += 1
+        por_insercion[(ag, a.created_at.date().isoformat() if a.created_at else "—")] += 1
+
+    claves = sorted(set(por_llamada) | set(por_insercion), key=lambda k: (k[1], k[0]))
+    print("\n[SIMULACROS POR AGENTE Y DÍA]")
+    print(f"  {'día':<12} {'agente':<26} {'por llamada':>12} {'por inserción':>14}")
+    for ag, dia in claves:
+        n_real, n_ins = por_llamada.get((ag, dia), 0), por_insercion.get((ag, dia), 0)
+        if n_real < 5 and n_ins < 5:
+            continue
+        marca = "   <-- recuperadas" if n_ins - n_real >= 5 else ""
+        print(f"  {dia:<12} {ag:<26} {n_real:>12} {n_ins:>14}{marca}")
+    desfase = sum(
+        1 for a in rows
+        if a.call_date and a.created_at
+        and a.call_date.date() != a.created_at.date()
+    )
+    print(f"\n  Evaluadas en un día distinto al de la llamada: {desfase}/{len(rows)}")
+    if desfase:
+        print("  -> Son las recuperadas. El panel y el escalado las cuentan en su día real;")
+        print("     la columna 'por inserción' seguirá mostrándolas juntas, y es correcto.")
 
 
 async def _informe_fechas(rows: list[QualityAnalysis], dia: str) -> None:
