@@ -117,8 +117,14 @@ export default function AgentesDashboard() {
                         <NivelBadge nivel={a.nivel_recomendado} />
                         {cambia && <span className="ml-1 text-xs text-muted">{nivelIdx(a.nivel_recomendado) > nivelIdx(a.nivel_actual) ? "↑" : "↓"}</span>}
                       </td>
-                      <td className="px-4 py-2 text-right">
-                        <button onClick={() => setDetalle(a)} className="text-accent hover:underline whitespace-nowrap">Ver detalles</button>
+                      <td className="px-4 py-2 text-right whitespace-nowrap">
+                        <Link
+                          href={`/dashboard/agente?nombre=${encodeURIComponent(a.agente)}`}
+                          className="text-accent hover:underline mr-3"
+                        >
+                          Ver evolución
+                        </Link>
+                        <button onClick={() => setDetalle(a)} className="text-muted hover:text-white">Editar</button>
                       </td>
                     </tr>
                   );
@@ -357,8 +363,14 @@ function AgenteDetailModal({
         <NivelProgreso agente={agente.agente} />
       </div>
 
-      <div className="flex justify-start border-t border-border pt-3 mt-4">
+      <div className="flex justify-between items-center border-t border-border pt-3 mt-4">
         <button onClick={() => setConfirmar(true)} className="text-sm text-rose-400 hover:text-rose-300">Eliminar agente</button>
+        <Link
+          href={`/dashboard/agente?nombre=${encodeURIComponent(agente.agente)}`}
+          className="text-sm text-accent hover:underline"
+        >
+          Ver evolución completa →
+        </Link>
       </div>
       {confirmar && (
         <ConfirmDelete

@@ -183,6 +183,8 @@ export const api = {
       request<Analysis>(`/api/analyses/${id}/redispatch`, { method: "POST" }),
     reasignar: (id: string, agente_nombre: string) =>
       request<ReasignarResult>(`/api/analyses/${id}/reasignar`, { method: "POST", json: { agente_nombre } }),
+    evolucion: (nombre: string) =>
+      request<AgenteEvolucion>(`/api/analyses/agente/${encodeURIComponent(nombre)}/evolucion`),
     stats: (params?: { departamento?: string; agente?: string; desde?: string; hasta?: string }) => {
       const entries: [string, string][] = [];
       for (const [k, v] of Object.entries(params || {})) {
@@ -205,6 +207,53 @@ export interface Stats {
   por_agente: AgenteRow[];
   agentes: string[];
   departamentos: string[];
+}
+
+// Ficha de evolución de un agente: tramos por nivel + curva + peores temas.
+export interface TramoNivel {
+  nivel: string | null;
+  desde: string | null;
+  hasta: string | null;
+  llamadas: number;
+  evaluadas: number;
+  avg_percent: number | null;
+  // true = no hay eventos de nivel que cubran ese periodo (histórico antiguo):
+  // sabemos cuántas llamadas fueron, no en qué nivel estaba.
+  estimado: boolean;
+  en_curso: boolean;
+  salida: {
+    fecha: string | null;
+    to_nivel: string;
+    direction: string;
+    origen: string;
+    motivo: string;
+    actor: string;
+  } | null;
+}
+export interface LlamadaAgente {
+  id: string;
+  fecha: string | null;
+  escenario: string | null;
+  departamento: string | null;
+  dificultad: string | null;
+  percent: number | null;
+  status: string;
+}
+export interface AgenteEvolucion {
+  agente: string;
+  resumen: {
+    total: number;
+    evaluados: number;
+    avg_percent: number | null;
+    nivel_actual: string | null;
+    departamento_activo: string | null;
+    memberships: AgenteMembership[];
+  };
+  tramos: TramoNivel[];
+  eventos: NivelEvento[];
+  llamadas: LlamadaAgente[];
+  por_dificultad: { dificultad: string; avg_percent: number | null; count: number }[];
+  por_parametro: { id: string; name: string; avg_percent: number | null; count: number }[];
 }
 
 export interface AgenteMembership {

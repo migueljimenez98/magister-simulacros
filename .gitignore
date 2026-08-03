@@ -17,3 +17,6 @@ build/
 *.log
 .DS_Store
 .firebase/
+
+# artefacto local de tsc --noEmit
+tsconfig.tsbuildinfo

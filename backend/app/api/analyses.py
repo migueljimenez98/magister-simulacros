@@ -10,7 +10,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 
 from ..core.config import settings
-from ..core.models import QualityAnalysis, QualityProject, SimulacroComercial, SimulacroDepartamento
+from ..core.models import (
+    QualityAnalysis,
+    QualityProject,
+    SimulacroComercial,
+    SimulacroDepartamento,
+    SimulacroNivelEvento,
+)
 from ..services import leveling
 from .deps import CurrentUser, SessionDep, actor_label, current_user, get_audit_graph, require_role
 
@@ -283,6 +289,175 @@ async def stats(
         "por_agente": por_agente,
         "agentes": sorted(memb_by_name.keys() | set(ag_count.keys())),
         "departamentos": sorted({d.nombre for d in deptos}),
+    }
+
+
+def _avg1(xs: list[float]) -> float | None:
+    return round(sum(xs) / len(xs), 1) if xs else None
+
+
+@router.get("/agente/{nombre}/evolucion")
+async def evolucion_agente(nombre: str, session: SessionDep) -> dict[str, Any]:
+    """Ficha de evolución de UN agente: todo lo necesario para responder
+    "cuántos simulacros ha hecho, en qué nivel, y cómo ha avanzado".
+
+    El bloque clave es `tramos`: los periodos entre cambios de nivel, cada uno
+    con las llamadas que hizo mientras estuvo ahí y su nota media. Se calculan
+    cruzando las fechas de los simulacros con las de los eventos de nivel.
+
+    Honestidad sobre el histórico: los cambios de nivel solo se registran desde
+    que existe `simulacro_nivel_eventos`. Las llamadas anteriores al primer
+    evento caen en un tramo marcado `estimado=True` — sabemos cuántas fueron,
+    pero no en qué nivel estaba entonces. La vista `por_dificultad` sí es
+    retroactiva (la dificultad del guión va en el snapshot de cada llamada).
+    """
+    # La dificultad vive en el snapshot; la extraemos con un path JSONB para no
+    # traernos la transcripción entera de cada llamada.
+    dificultad_col = QualityAnalysis.crm_snapshot["_simulacro"]["scenario"]["dificultad"].astext
+    rows = (await session.execute(
+        select(
+            QualityAnalysis.id,
+            QualityAnalysis.created_at,
+            QualityAnalysis.percent_quality,
+            QualityAnalysis.status,
+            QualityAnalysis.escenario,
+            QualityAnalysis.departamento,
+            QualityAnalysis.scores,
+            dificultad_col.label("dificultad"),
+        )
+        .where(QualityAnalysis.agente_nombre == nombre)
+        .order_by(QualityAnalysis.created_at)
+    )).mappings().all()
+
+    llamadas: list[dict[str, Any]] = []
+    fechas: list[datetime | None] = []
+    por_dif: dict[str, list[float]] = {}
+    por_param: dict[str, list[float]] = {}
+    notas: list[float] = []
+    for r in rows:
+        pq = float(r["percent_quality"]) if r["percent_quality"] is not None else None
+        llamadas.append({
+            "id": r["id"],
+            "fecha": r["created_at"].isoformat() if r["created_at"] else None,
+            "escenario": r["escenario"],
+            "departamento": r["departamento"],
+            "dificultad": r["dificultad"],
+            "percent": pq,
+            "status": r["status"],
+        })
+        fechas.append(r["created_at"])
+        if r["status"] != "done" or pq is None:
+            continue
+        notas.append(pq)
+        if r["dificultad"]:
+            por_dif.setdefault(r["dificultad"], []).append(pq)
+        for rid, sc in (r["scores"] or {}).items():
+            if not isinstance(sc, dict) or not sc.get("applied"):
+                continue
+            mx, scv = sc.get("max") or 0, sc.get("score")
+            if mx and scv is not None:
+                por_param.setdefault(rid, []).append(float(scv) / float(mx) * 100.0)
+
+    # ── Tramos: un periodo por cada nivel por el que ha pasado ────────────────
+    eventos = (await session.execute(
+        select(SimulacroNivelEvento)
+        .where(SimulacroNivelEvento.agente_nombre == nombre)
+        .order_by(SimulacroNivelEvento.created_at)
+    )).scalars().all()
+
+    def _tramo(
+        nivel: str | None, desde: datetime | None, hasta: datetime | None,
+        estimado: bool, salida: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        idx = [
+            i for i, f in enumerate(fechas)
+            if f is not None
+            and (desde is None or f > desde)
+            and (hasta is None or f <= hasta)
+        ]
+        vals = [llamadas[i]["percent"] for i in idx if llamadas[i]["percent"] is not None]
+        return {
+            "nivel": nivel,
+            "desde": desde.isoformat() if desde else None,
+            "hasta": hasta.isoformat() if hasta else None,
+            "llamadas": len(idx),
+            "evaluadas": len(vals),
+            "avg_percent": _avg1(vals),
+            "estimado": estimado,
+            "salida": salida,
+            "en_curso": hasta is None,
+        }
+
+    tramos: list[dict[str, Any]] = []
+    prev: datetime | None = None
+    for i, ev in enumerate(eventos):
+        salida = {
+            "fecha": ev.created_at.isoformat() if ev.created_at else None,
+            "to_nivel": ev.to_nivel,
+            "direction": ev.direction,
+            "origen": ev.origen,
+            "motivo": ev.motivo or "",
+            "actor": ev.actor or "",
+        }
+        # El alta no cierra ningún tramo previo real: abre el historial.
+        if i == 0 and ev.from_nivel is None:
+            t = _tramo(None, None, ev.created_at, False, salida)
+            if t["llamadas"]:
+                tramos.append(t)
+            prev = ev.created_at
+            continue
+        tramos.append(_tramo(ev.from_nivel, prev, ev.created_at, prev is None, salida))
+        prev = ev.created_at
+
+    comerciales = (await session.execute(
+        select(SimulacroComercial).where(SimulacroComercial.nombre == nombre)
+    )).scalars().all()
+    activa = next((c for c in comerciales if c.activo), comerciales[0] if comerciales else None)
+    nivel_actual = eventos[-1].to_nivel if eventos else (activa.nivel if activa else None)
+    # Tramo abierto: el nivel de hoy. Si nunca hubo eventos, TODO el historial
+    # cae aquí y se marca estimado (no sabemos si antes estuvo en otro nivel).
+    tramos.append(_tramo(nivel_actual, prev, None, not eventos, None))
+
+    deptos = {d.id: d.nombre for d in (await session.execute(
+        select(SimulacroDepartamento)
+    )).scalars().all()}
+    project = await session.get(QualityProject, settings.simulacros_project_id)
+    rule_names = {
+        r.get("id"): (r.get("name") or r.get("id")) for r in (project.rules_table or [])
+    } if project else {}
+
+    return {
+        "agente": nombre,
+        "resumen": {
+            "total": len(llamadas),
+            "evaluados": len(notas),
+            "avg_percent": _avg1(notas),
+            "nivel_actual": nivel_actual,
+            "departamento_activo": (deptos.get(activa.department_id) if activa else None),
+            "memberships": [
+                {
+                    "id": c.id, "department_id": c.department_id,
+                    "departamento": deptos.get(c.department_id) or "(sin departamento)",
+                    "nivel": c.nivel, "activo": c.activo,
+                }
+                for c in comerciales
+            ],
+        },
+        "tramos": tramos,
+        "eventos": [leveling.evento_to_dict(e) for e in reversed(eventos)],
+        "llamadas": llamadas,
+        "por_dificultad": [
+            {"dificultad": d, "avg_percent": _avg1(v), "count": len(v)}
+            for d, v in sorted(
+                por_dif.items(),
+                key=lambda kv: _NIVEL_ORDER.index(kv[0]) if kv[0] in _NIVEL_ORDER else 9,
+            )
+        ],
+        "por_parametro": sorted(
+            ({"id": rid, "name": rule_names.get(rid, rid), "avg_percent": _avg1(v), "count": len(v)}
+             for rid, v in por_param.items()),
+            key=lambda x: (x["avg_percent"] if x["avg_percent"] is not None else 999),
+        ),
     }
 
 
