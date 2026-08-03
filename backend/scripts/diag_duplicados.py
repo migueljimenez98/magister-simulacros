@@ -30,6 +30,12 @@ Uso:
     # (los que provocó la avalancha de duplicados) y devuelve al agente
     # al nivel que tenía antes:
     python -m scripts.diag_duplicados --apply --eventos-desde 2026-08-03
+
+    # Informe de fechas de un día concreto: contrasta cuándo se INSERTÓ cada
+    # fila con cuándo ocurrió la llamada. Sirve cuando no hay duplicados pero
+    # sí una avalancha sospechosa en un solo día (típico tras recuperar
+    # llamadas antiguas: se insertan hoy y parecen todas de hoy):
+    python -m scripts.diag_duplicados --fechas 2026-08-03
 """
 from __future__ import annotations
 
@@ -134,7 +140,41 @@ async def _informe_distribucion(rows: list[QualityAnalysis]) -> None:
         print("  (ningún agente supera los 5 simulacros en un mismo día)")
 
 
-async def main(apply: bool, eventos_desde: str | None) -> None:
+async def _informe_fechas(rows: list[QualityAnalysis], dia: str) -> None:
+    """Contrasta CUÁNDO se insertó la fila con cuándo ocurrió la llamada.
+
+    `created_at` es la hora de inserción. Si una recuperación mete hoy llamadas
+    de días pasados, todas quedan fechadas hoy: parecen una avalancha y el motor
+    de escalado (que mira los últimos N tests por esa fecha) se dispara con
+    datos que no son de hoy. Aquí se ve si es eso lo que pasó y, sobre todo, qué
+    campos del snapshot permitirían recuperar la fecha real."""
+    sel = [a for a in rows if a.created_at and a.created_at.date().isoformat() == dia]
+    print(f"\n[FECHAS · insertadas el {dia}] {len(sel)} evaluaciones")
+    if not sel:
+        return
+    claves: set[str] = set()
+    for a in sel:
+        claves |= set(_sim(a).keys())
+    print(f"  campos disponibles en el snapshot: {sorted(claves)}")
+    marcas = [k for k in sorted(claves) if "time" in k.lower() or "date" in k.lower()]
+    print(f"  campos con pinta de fecha: {marcas or 'NINGUNO — la hora real no está guardada'}")
+    print(f"\n  {'insertada':<17} {'call_date':<17} {'nota':>5}  {'call_id':<24} agente")
+    for a in sorted(sel, key=_created)[:40]:
+        print(f"  {_fecha(a.created_at):<17} {_fecha(a.call_date):<17} "
+              f"{str(a.percent_quality or '—'):>5}  {(_call_id(a) or '—')[:24]:<24} {a.agente_nombre}")
+    if len(sel) > 40:
+        print(f"  … y {len(sel) - 40} más")
+    iguales = sum(
+        1 for a in sel
+        if a.call_date and a.created_at and abs((a.call_date - a.created_at).total_seconds()) < 120
+    )
+    print(f"\n  call_date coincide con la inserción en {iguales}/{len(sel)} filas.")
+    if iguales == len(sel):
+        print("  -> La hora real de la llamada NO se guardó: se selló la de inserción.")
+        print("     Para recolocarlas hace falta el volcado de Retell (start_timestamp por call_id).")
+
+
+async def main(apply: bool, eventos_desde: str | None, dia_fechas: str | None) -> None:
     print(f"\n=== Duplicados de simulacros — modo: {'APLICAR CAMBIOS' if apply else 'solo informe'} ===")
 
     async with async_session() as s:
@@ -168,6 +208,8 @@ async def main(apply: bool, eventos_desde: str | None) -> None:
             print(f"    {ag:<28} -{n}")
 
         await _informe_distribucion(list(rows))
+        if dia_fechas:
+            await _informe_fechas(list(rows), dia_fechas)
 
         # Cambios de nivel recientes: aquí se ve si la avalancha disparó el motor.
         evs = (await s.execute(
@@ -217,10 +259,17 @@ async def main(apply: bool, eventos_desde: str | None) -> None:
         print("Repasa el panel: Agentes → Ver evolución del agente afectado.")
 
 
+def _valor(args: list[str], flag: str) -> str | None:
+    if flag not in args:
+        return None
+    i = args.index(flag)
+    return args[i + 1] if i + 1 < len(args) and not args[i + 1].startswith("--") else None
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
-    desde = None
-    if "--eventos-desde" in args:
-        i = args.index("--eventos-desde")
-        desde = args[i + 1] if i + 1 < len(args) else None
-    asyncio.run(main("--apply" in args, desde))
+    asyncio.run(main(
+        "--apply" in args,
+        _valor(args, "--eventos-desde"),
+        _valor(args, "--fechas"),
+    ))
