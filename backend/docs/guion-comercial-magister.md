@@ -48,7 +48,9 @@ Intenta que os cuente, si no lo sabéis ya:
 ## 5. Cierre
 
 - Siempre se indica el precio oficial y luego el precio reducido con condiciones especiales.
-- Si no figura que tenga los cursos, se debe comentar el curso homologado incluido haciendo la matrícula ahora o durante el día de hoy para animar e intentar cerrar.
+- **El precio puede variar según la titulación y la oferta vigente: confiar en el precio que dé la asesora, no exigir una cifra concreta.**
+- Si no figura que tenga los cursos, se debe comentar que el curso homologado va incluido SIN matrícula ni coste adicional para animar e intentar cerrar.
+- **La matrícula de 31 € es SOLO de la reserva anticipada de la preparación de oposiciones. Los cursos homologados NO llevan matrícula.**
 - **SIEMPRE se pregunta: ¿Te animas a hacer la matrícula?**
 
 ## 6. Objeciones

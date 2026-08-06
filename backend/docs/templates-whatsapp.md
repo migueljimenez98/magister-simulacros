@@ -17,6 +17,11 @@ libre — solo plantillas. Por tanto, una plantilla aprobada **NO es
 disponible. El auditor debe reconocerla como tal y NO penalizarla por
 "falta de personalización" o "uso de template genérico".
 
+> **Matrícula y precios:** la matrícula de 31 € mencionada en estas plantillas es SOLO
+> de la reserva anticipada de la preparación de oposiciones. Los cursos homologados NO
+> llevan matrícula. Además, el precio puede variar según la titulación y la oferta
+> vigente: confiar en el precio que dé la asesora y no exigir una cifra concreta.
+
 ---
 
 ## `oposiciones_confirmar_email_post_llamada`
